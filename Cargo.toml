@@ -1,0 +1,14 @@
+[package]
+name = "lang"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+colored = "3.0.0"
+parking_lot = "0.12.4"
+quickscope = "0.2.0"
+rustc-hash = "2.1.1"
+thiserror = "2.0.12"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

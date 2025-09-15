@@ -1,0 +1,22 @@
+import {
+    "fmt/print_ln"
+}
+
+extern "C" {
+    fn puts(str &CStr) Int;
+}
+
+struct Str {
+    len Uint,
+    chars &CStr
+}
+
+// pub fn print_ln(str &Str) Void {
+//     puts(str.chars);
+// }
+
+fn main() Int {
+    puts(&c"hello 1");
+    puts(&c"hello 2");
+    return 0;
+}

@@ -1,0 +1,22 @@
+import {
+}
+
+extern "C" {
+    // This isn't the actual printf signature, but we won't have variadic functions
+    fn printf(str &CStr, message &CStr, total Int) Int;
+}
+
+fn main() void {
+    calc("testing calculation");
+}
+
+fn add(num1 int, num2 int) int {
+    return num1 + num2;
+}
+
+fn calc(message str) void {
+    let x = 5;
+    let y = x + 2;
+    let z = add(x, y + 5);
+    printf("%s z: %d\n", message, z);
+}

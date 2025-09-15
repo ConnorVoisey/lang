@@ -1,0 +1,8 @@
+import {
+}
+
+fn main() int {
+    let foo = 5;
+    let bar = 2 + foo;
+    return 0;
+}
