@@ -5,6 +5,7 @@ use crate::{
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
+    cl_export::CraneliftId,
     interner::{IdentId, SharedInterner},
     symbols::error::SymbolError,
     type_checker::TypeChecker,
@@ -44,6 +45,7 @@ pub struct Symbol {
     pub ident_id: IdentId,
     pub scope_depth: usize,
     pub kind: SymbolKind,
+    pub cranelift_id: Option<CraneliftId>,
 }
 
 #[derive(Debug)]
@@ -85,6 +87,7 @@ impl SymbolTable {
             ident_id,
             kind: symbol_kind,
             scope_depth,
+            cranelift_id: None,
         });
         let last_scope = self
             .scopes

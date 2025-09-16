@@ -1,10 +1,13 @@
+use target_lexicon::Triple;
+
 use crate::{
-    ast::Ast, error::CompliationError, interner::SharedInterner, lexer::Lexer,
-    symbols::SymbolTable, type_checker::TypeChecker, types::TypeArena,
+    ast::Ast, cl_export::CLExporter, error::CompliationError, interner::SharedInterner,
+    lexer::Lexer, symbols::SymbolTable, type_checker::TypeChecker, types::TypeArena,
 };
-use std::fs::read_to_string;
+use std::{fs::read_to_string, process::Command};
 
 pub mod ast;
+pub mod cl_export;
 pub mod error;
 pub mod interner;
 pub mod lexer;
@@ -40,6 +43,27 @@ impl ModParser {
         if !type_checker.errors.is_empty() {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
         }
+
+        let mut cl_export = CLExporter::new(
+            interner.clone(),
+            Triple::host(),
+            false,
+            &ast,
+            &type_arena,
+            &mut symbols,
+        );
+        cl_export.cl_compile().unwrap();
+
+        let mut cc_comand = Command::new("tcc");
+        cc_comand.arg("lang_tmp/out.o").args(["-o", "out"]);
+
+        match cc_comand.output() {
+            Ok(_) => (),
+            Err(e) => {
+                dbg!(e);
+                panic!();
+            }
+        };
         let mod_parser = ModParser {};
 
         Ok(mod_parser)

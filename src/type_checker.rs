@@ -27,6 +27,9 @@ impl<'a> TypeChecker<'a> {
     }
 
     pub fn check_ast(&mut self, ast: &mut Ast) {
+        for f in &mut ast.extern_fns {
+            self.check_func(f);
+        }
         for f in &mut ast.fns {
             self.check_func(f);
         }
