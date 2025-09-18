@@ -211,26 +211,13 @@ impl SymbolTable {
             for statement in &mut body.statements {
                 match &mut statement.kind {
                     StatementKind::Decleration {
-                        symbol_id,
-                        ident_id,
+                        symbol_id: _,
+                        ident_id: _,
                         ident_token_at: _,
-                        expr: _,
-                    } => match self.lookup(*ident_id) {
-                        Some(t) => {
-                            dbg!(t);
-                            todo!("duplicate definitions within the same scope: {t:?}");
-                        }
-                        None => {
-                            *symbol_id = Some(self.declare(
-                                *ident_id,
-                                SymbolKind::Var {
-                                    type_id: None,
-                                    is_used: false,
-                                    is_mutable: false,
-                                },
-                            ));
-                        }
-                    },
+                        expr,
+                    } => {
+                        self.register_expr(expr);
+                    }
                     StatementKind::Assignment {
                         ident_id: _,
                         ident_token_at: _,

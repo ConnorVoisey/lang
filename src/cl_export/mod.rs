@@ -7,8 +7,8 @@ use crate::{
     },
     interner::SharedInterner,
     lexer::TokenKind,
-    symbols::SymbolTable,
-    types::{TypeArena, TypeKind},
+    symbols::{SymbolKind, SymbolTable},
+    types::{TypeArena, TypeId, TypeKind},
 };
 use cranelift::{
     codegen::{
@@ -30,6 +30,7 @@ use target_lexicon::Triple;
 #[derive(Copy, Clone, Debug)]
 pub enum CraneliftId {
     Func(FuncId),
+    Var(Variable),
 }
 
 pub struct CLExporter<'a> {
@@ -170,11 +171,40 @@ impl<'a> CLExporter<'a> {
                     fn_builder.ins().return_(&[cl_val]);
                 }
                 StatementKind::Decleration {
-                    symbol_id: _,
+                    symbol_id,
                     ident_id: _,
                     ident_token_at: _,
-                    expr: _,
-                } => todo!(),
+                    expr,
+                } => {
+                    let symb = self.symbols.resolve_mut(*symbol_id);
+                    match symb.kind {
+                        SymbolKind::Var {
+                            type_id,
+                            is_used: _,
+                            is_mutable: _,
+                        } => {
+                            let ty = self.types.kind(type_id.unwrap());
+                            let cl_var = match ty {
+                                TypeKind::Int => fn_builder.declare_var(types::I32),
+                                TypeKind::Uint => todo!(),
+                                TypeKind::Str => todo!(),
+                                TypeKind::CStr => todo!(),
+                                TypeKind::Ref(type_id) => todo!(),
+                                TypeKind::Unknown => todo!(),
+                                TypeKind::Var => todo!(),
+                                t => {
+                                    dbg!(t);
+                                    todo!();
+                                }
+                            };
+                            symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                            let cl_val =
+                                self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
+                            fn_builder.def_var(cl_var, cl_val);
+                        }
+                        _ => todo!(),
+                    };
+                }
                 StatementKind::Assignment {
                     ident_id: _,
                     ident_token_at: _,
@@ -211,7 +241,16 @@ impl<'a> CLExporter<'a> {
     ) -> color_eyre::Result<Value> {
         let val = match &expr.kind {
             ExprKind::Atom(atom) => match atom {
-                Atom::Ident(_) => todo!(),
+                Atom::Ident((_, symbol_id)) => {
+                    let symb = self.symbols.resolve_mut(symbol_id.unwrap());
+                    match symb.cranelift_id.unwrap() {
+                        CraneliftId::Var(variable) => fn_builder.use_var(variable),
+                        t => {
+                            dbg!(t);
+                            panic!();
+                        }
+                    }
+                }
                 Atom::Int(int_val) => fn_builder.ins().iconst(types::I32, *int_val as i64),
                 Atom::CStr(str_val) => {
                     let c_str_val = match &self.ast.tokens[*str_val].kind {

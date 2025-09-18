@@ -192,7 +192,7 @@ impl Ast {
         };
 
         self.next_token();
-        fn_dec.body = self.parse_block();
+        fn_dec.body = self.parse_block(symbols);
         self.fns.push(fn_dec);
     }
 }

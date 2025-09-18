@@ -14,11 +14,11 @@ use crate::{
 pub struct TypeChecker<'a> {
     pub arena: &'a mut TypeArena,
     pub errors: Vec<UnifyError>,
-    pub symbols: &'a SymbolTable,
+    pub symbols: &'a mut SymbolTable,
 }
 
 impl<'a> TypeChecker<'a> {
-    pub fn new(arena: &'a mut TypeArena, symbols: &'a SymbolTable) -> Self {
+    pub fn new(arena: &'a mut TypeArena, symbols: &'a mut SymbolTable) -> Self {
         Self {
             arena,
             errors: vec![],
@@ -57,9 +57,24 @@ impl<'a> TypeChecker<'a> {
                     StatementKind::Decleration {
                         ident_token_at: _,
                         ident_id: _,
-                        symbol_id: _,
-                        expr: _,
-                    } => todo!(),
+                        symbol_id,
+                        expr,
+                    } => {
+                        let new_type_id = self.check_expr(expr);
+                        let sym = self.symbols.resolve_mut(*symbol_id);
+                        match &mut sym.kind {
+                            SymbolKind::Var {
+                                type_id,
+                                is_used: _,
+                                is_mutable: _,
+                            } => {
+                                *type_id = Some(new_type_id);
+                            }
+                            _ => unreachable!(
+                                "Just checked that the statement was a var so the symbol for it should be a var as well"
+                            ),
+                        }
+                    }
                     StatementKind::Assignment {
                         ident_token_at: _,
                         ident_id: _,
@@ -92,9 +107,7 @@ impl<'a> TypeChecker<'a> {
                     Atom::Str(_) => self.arena.alloc(TypeKind::Str),
                     Atom::CStr(_) => self.arena.alloc(TypeKind::CStr),
                     Atom::Ident((_, symbol_id)) => {
-                        // look up type from symbol table
                         let sym = self.symbols.resolve(symbol_id.unwrap());
-                        // you'd have stored its TypeId earlier
                         match &sym.kind {
                             SymbolKind::Fn {
                                 fn_type_id,

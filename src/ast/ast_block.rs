@@ -2,7 +2,7 @@ use crate::{
     ast::{Ast, ast_expr::AstExpr},
     interner::IdentId,
     lexer::{Token, TokenKind},
-    symbols::SymbolId,
+    symbols::{SymbolId, SymbolKind, SymbolTable},
     types::TypeId,
 };
 
@@ -16,7 +16,7 @@ pub struct AstBlock {
 #[derive(Debug)]
 pub enum StatementKind {
     Decleration {
-        symbol_id: Option<SymbolId>,
+        symbol_id: SymbolId,
         ident_id: IdentId,
         ident_token_at: usize,
         expr: AstExpr,
@@ -36,7 +36,7 @@ pub struct AstStatement {
 }
 
 impl Ast {
-    pub fn parse_block(&mut self) -> Option<AstBlock> {
+    pub fn parse_block(&mut self, symbols: &mut SymbolTable) -> Option<AstBlock> {
         assert!(
             matches!(
                 self.curr_token(),
@@ -55,7 +55,7 @@ impl Ast {
                     break;
                 }
                 _ => {
-                    if let Some(statement) = self.parse_statement() {
+                    if let Some(statement) = self.parse_statement(symbols) {
                         statements.push(statement);
                     }
                 }
@@ -70,7 +70,7 @@ impl Ast {
         })
     }
 
-    pub fn parse_statement(&mut self) -> Option<AstStatement> {
+    pub fn parse_statement(&mut self, symbols: &mut SymbolTable) -> Option<AstStatement> {
         let start_token_at = self.curr_token_i();
         match self.curr_token() {
             Some(Token {
@@ -87,11 +87,30 @@ impl Ast {
                         todo!();
                     }
                 };
+                let symbol_id = symbols.declare(
+                    ident_id,
+                    SymbolKind::Var {
+                        type_id: None,
+                        is_used: false,
+                        is_mutable: false,
+                    },
+                );
+                assert!(
+                    matches!(
+                        self.next_token(),
+                        Some(Token {
+                            kind: TokenKind::Assign,
+                            ..
+                        })
+                    ),
+                    "Attempted to define a variable but missed the `=` after the ident"
+                );
+                self.next_token();
                 Some(AstStatement {
                     start_token_at,
                     kind: StatementKind::Decleration {
                         ident_id,
-                        symbol_id: None,
+                        symbol_id,
                         ident_token_at: start_token_at + 1,
                         expr: self.parse_expr(0)?,
                     },

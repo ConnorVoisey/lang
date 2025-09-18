@@ -4,6 +4,7 @@ import {
 
 extern "C" {
     fn puts(str &CStr) Int;
+    fn printf(str &CStr, val Int) Int;
 }
 
 struct Str {
@@ -16,7 +17,10 @@ struct Str {
 // }
 
 fn main() Int {
-    puts(&c"hello 1");
+    let foo = 5 ;
+    let bar =  foo + 2;
+    printf(&c"hello 1 edited %d
+", foo + bar);
     puts(&c"hello 2");
     return 0;
 }

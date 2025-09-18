@@ -38,7 +38,7 @@ impl ModParser {
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 
-        let mut type_checker = TypeChecker::new(&mut type_arena, &symbols);
+        let mut type_checker = TypeChecker::new(&mut type_arena, &mut symbols);
         type_checker.check_ast(&mut ast);
         if !type_checker.errors.is_empty() {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
