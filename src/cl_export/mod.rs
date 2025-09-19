@@ -209,7 +209,12 @@ impl<'a> CLExporter<'a> {
                 StatementKind::Expr(expr) => {
                     self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
                 }
-                StatementKind::Return(expr) => {
+                StatementKind::ExplicitReturn(expr) => {
+                    let cl_val =
+                        self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
+                    fn_builder.ins().return_(&[cl_val]);
+                }
+                StatementKind::BlockReturn(expr) => {
                     let cl_val =
                         self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
                     fn_builder.ins().return_(&[cl_val]);

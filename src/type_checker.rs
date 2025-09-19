@@ -83,7 +83,15 @@ impl<'a> TypeChecker<'a> {
                     StatementKind::Expr(ast_expr) => {
                         self.check_expr(ast_expr);
                     }
-                    StatementKind::Return(ast_expr) => {
+                    StatementKind::ExplicitReturn(ast_expr) => {
+                        let return_type_id = self.check_expr(ast_expr);
+                        if let Err(e) = self.arena.unify(return_type_id, f.return_type_id.unwrap())
+                        {
+                            dbg!(e);
+                            panic!();
+                        }
+                    }
+                    StatementKind::BlockReturn(ast_expr) => {
                         let return_type_id = self.check_expr(ast_expr);
                         if let Err(e) = self.arena.unify(return_type_id, f.return_type_id.unwrap())
                         {

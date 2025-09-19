@@ -237,7 +237,10 @@ impl SymbolTable {
                     StatementKind::Expr(ast_expr) => {
                         self.register_expr(ast_expr);
                     }
-                    StatementKind::Return(ast_expr) => {
+                    StatementKind::ExplicitReturn(ast_expr) => {
+                        self.register_expr(ast_expr);
+                    }
+                    StatementKind::BlockReturn(ast_expr) => {
                         self.register_expr(ast_expr);
                     }
                 };
@@ -298,6 +301,15 @@ impl SymbolTable {
                 Op::BracketOpen { left, right } => {
                     self.register_expr(left);
                     self.register_expr(right);
+                }
+                Op::IfElse {
+                    condition,
+                    block: _,
+                    else_ifs: _,
+                    else_clause: _,
+                } => {
+                    self.register_expr(condition);
+                    todo!("need to register the block and else part");
                 }
             },
         }

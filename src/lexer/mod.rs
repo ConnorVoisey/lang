@@ -42,6 +42,8 @@ pub enum TokenKind {
     ExternKeyWord,
     StructKeyWord,
     ReturnKeyWord,
+    IfKeyWord,
+    ElseKeyWord,
 }
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -251,6 +253,8 @@ impl<'src> Lexer<'src> {
             "extern" => TokenKind::ExternKeyWord,
             "struct" => TokenKind::StructKeyWord,
             "return" => TokenKind::ReturnKeyWord,
+            "if" => TokenKind::IfKeyWord,
+            "else" => TokenKind::ElseKeyWord,
             _ => {
                 let mut interner_writable = interner.write();
                 let id = interner_writable.lookup_ident(val);

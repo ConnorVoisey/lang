@@ -27,7 +27,8 @@ pub enum StatementKind {
         expr: AstExpr,
     },
     Expr(AstExpr),
-    Return(AstExpr),
+    ExplicitReturn(AstExpr),
+    BlockReturn(AstExpr),
 }
 #[derive(Debug)]
 pub struct AstStatement {
@@ -56,7 +57,12 @@ impl Ast {
                 }
                 _ => {
                     if let Some(statement) = self.parse_statement(symbols) {
+                        let need_break =
+                            matches!(&statement.kind, StatementKind::BlockReturn(_));
                         statements.push(statement);
+                        if need_break {
+                            break;
+                        }
                     }
                 }
             };
@@ -112,7 +118,7 @@ impl Ast {
                         ident_id,
                         symbol_id,
                         ident_token_at: start_token_at + 1,
-                        expr: self.parse_expr(0)?,
+                        expr: self.parse_expr(0, symbols)?,
                     },
                 })
             }
@@ -123,7 +129,7 @@ impl Ast {
                 self.next_token();
                 Some(AstStatement {
                     start_token_at,
-                    kind: StatementKind::Return(self.parse_expr(0)?),
+                    kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols)?),
                 })
             }
             None => {
@@ -131,9 +137,16 @@ impl Ast {
             }
             _ => {
                 let start_token_at = self.curr_token_i();
+                let expr = self.parse_expr(0, symbols)?;
                 Some(AstStatement {
                     start_token_at,
-                    kind: StatementKind::Expr(self.parse_expr(0)?),
+                    kind: match self.curr_token() {
+                        Some(Token {
+                            kind: TokenKind::CurlyBracketClose,
+                            ..
+                        }) => StatementKind::BlockReturn(expr),
+                        _ => StatementKind::Expr(expr),
+                    },
                 })
             }
         }

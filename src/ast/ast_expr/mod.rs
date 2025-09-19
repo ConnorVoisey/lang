@@ -2,7 +2,7 @@ use crate::{
     ast::{Ast, ast_block::AstBlock},
     interner::IdentId,
     lexer::{Token, TokenKind},
-    symbols::SymbolId,
+    symbols::{SymbolId, SymbolTable},
     types::TypeId,
 };
 
@@ -25,18 +25,51 @@ pub enum Atom {
 
 #[derive(Debug)]
 pub enum Op {
-    Add { left: AstExpr, right: AstExpr },
-    Divide { left: AstExpr, right: AstExpr },
-    Minus { left: AstExpr, right: AstExpr },
+    Add {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    Divide {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    Minus {
+        left: AstExpr,
+        right: AstExpr,
+    },
     Neg(AstExpr),
     Ref(AstExpr),
-    Multiply { left: AstExpr, right: AstExpr },
-    FnCall { ident: AstExpr, args: Vec<AstExpr> },
-    Dot { left: AstExpr, right: AstExpr },
+    Multiply {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    FnCall {
+        ident: AstExpr,
+        args: Vec<AstExpr>,
+    },
+    Dot {
+        left: AstExpr,
+        right: AstExpr,
+    },
     Block(AstBlock),
-    Equivalent { left: AstExpr, right: AstExpr },
-    SquareOpen { left: AstExpr, args: Vec<AstExpr> },
-    BracketOpen { left: AstExpr, right: AstExpr },
+    Equivalent {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    SquareOpen {
+        left: AstExpr,
+        args: Vec<AstExpr>,
+    },
+    BracketOpen {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    IfElse {
+        condition: AstExpr,
+        block: AstBlock,
+        else_ifs: Vec<(AstExpr, AstBlock)>,
+        else_clause: AstBlock,
+    },
 }
 
 #[derive(Debug)]
@@ -46,7 +79,7 @@ pub enum ExprKind {
 }
 
 impl Ast {
-    pub fn parse_expr(&mut self, min_bp: u8) -> Option<AstExpr> {
+    pub fn parse_expr(&mut self, min_bp: u8, symbols: &mut SymbolTable) -> Option<AstExpr> {
         let start_token_at = self.curr_token_i();
         let mut lhs = match &self
             .curr_token()
@@ -55,7 +88,7 @@ impl Ast {
         {
             TokenKind::BracketOpen => {
                 self.next_token();
-                let lhs = self.parse_expr(0);
+                let lhs = self.parse_expr(0, symbols);
                 assert!(
                     matches!(
                         self.curr_token(),
@@ -71,7 +104,9 @@ impl Ast {
             TokenKind::Subtract => {
                 let ((), r_bp) = prefix_binding_power(&TokenKind::Subtract);
                 self.next_token();
-                let rhs = self.parse_expr(r_bp).expect("Failed to parse prefix expr");
+                let rhs = self
+                    .parse_expr(r_bp, symbols)
+                    .expect("Failed to parse prefix expr");
                 self.next_token_i -= 1;
                 Some(AstExpr {
                     start_token_at,
@@ -108,12 +143,42 @@ impl Ast {
             TokenKind::Amp => {
                 let ((), r_bp) = prefix_binding_power(&TokenKind::Amp);
                 self.next_token();
-                let rhs = self.parse_expr(r_bp).expect("Failed to parse prefix expr");
+                let rhs = self
+                    .parse_expr(r_bp, symbols)
+                    .expect("Failed to parse prefix expr");
                 self.next_token_i -= 1;
                 Some(AstExpr {
                     start_token_at,
                     kind: ExprKind::Op(Box::new(Op::Ref(rhs))),
                     end_token_at: self.curr_token_i(),
+                    type_id: None,
+                })
+            }
+            TokenKind::IfKeyWord => {
+                self.next_token();
+                let condition = self
+                    .parse_expr(0, symbols)
+                    .expect("Failed to parse condition");
+                assert!(
+                    matches!(
+                        self.curr_token(),
+                        Some(Token {
+                            kind: TokenKind::CurlyBracketOpen,
+                            ..
+                        })
+                    ),
+                    "Parsed if condition then didnt have `{{`"
+                );
+                let block = self.parse_block(symbols).expect("Failed to parse if block");
+                Some(AstExpr {
+                    start_token_at,
+                    end_token_at: self.curr_token_i(),
+                    kind: ExprKind::Op(Box::new(Op::IfElse {
+                        condition,
+                        block,
+                        else_ifs: todo!(),
+                        else_clause: todo!(),
+                    })),
                     type_id: None,
                 })
             }
@@ -160,7 +225,7 @@ impl Ast {
                     TokenKind::SquareBracketOpen => {
                         let mut args = vec![];
                         loop {
-                            if let Some(arg) = self.parse_expr(0) {
+                            if let Some(arg) = self.parse_expr(0, symbols) {
                                 args.push(arg);
                             }
                             match self.curr_token() {
@@ -201,7 +266,7 @@ impl Ast {
                     TokenKind::BracketOpen => {
                         let mut args = vec![];
                         loop {
-                            if let Some(arg) = self.parse_expr(0) {
+                            if let Some(arg) = self.parse_expr(0, symbols) {
                                 args.push(arg);
                             }
                             match self.curr_token() {
@@ -259,7 +324,7 @@ impl Ast {
                 }
 
                 self.next_token();
-                let rhs = self.parse_expr(r_bp);
+                let rhs = self.parse_expr(r_bp, symbols);
 
                 let kind = match &op_token {
                     TokenKind::Add => Op::Add {
@@ -358,6 +423,12 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
+                Op::IfElse {
+                    condition,
+                    block,
+                    else_ifs,
+                    else_clause,
+                } => todo!(),
             })),
         }
     }
