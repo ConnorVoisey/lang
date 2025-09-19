@@ -175,10 +175,21 @@ impl SymbolTable {
             .args
             .iter_mut()
             .map(|arg| {
+                let symb = self.resolve_mut(arg.symbol_id);
                 let kind = arg.var_type.to_type_kind(types);
-                let type_id = types.alloc(kind);
-                arg.type_id = Some(type_id);
-                type_id
+                let new_type_id = types.alloc(kind);
+                match &mut symb.kind {
+                    SymbolKind::FnArg {
+                        type_id,
+                        is_used: _,
+                        is_mutable: _,
+                    } => {
+                        *type_id = Some(new_type_id);
+                    }
+                    _ => unreachable!("fn arg symbol should have tag for fn arg"),
+                }
+                arg.type_id = Some(new_type_id);
+                new_type_id
             })
             .collect();
 

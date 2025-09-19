@@ -30,6 +30,7 @@ use target_lexicon::Triple;
 #[derive(Copy, Clone, Debug)]
 pub enum CraneliftId {
     Func(FuncId),
+    FnParam { block: Block, param_index: usize },
     Var(Variable),
 }
 
@@ -146,8 +147,43 @@ impl<'a> CLExporter<'a> {
         };
 
         let mut sig = Signature::new(call_conv);
-        sig.returns.push(AbiParam::new(types::I32));
+        let symbol = self.symbols.resolve_mut(ast_fn.symbol_id);
+        match &symbol.kind {
+            SymbolKind::Fn {
+                fn_type_id: _,
+                param_type_ids,
+                return_type_id,
+            } => {
+                for param_type_id in param_type_ids {
+                    let cl_type = match self.types.kind(param_type_id.unwrap()) {
+                        TypeKind::Int => types::I32,
+                        TypeKind::Uint => todo!(),
+                        TypeKind::Str => todo!(),
+                        TypeKind::CStr => todo!(),
+                        TypeKind::Ref(_) => todo!(),
+                        TypeKind::Unknown => todo!(),
+                        TypeKind::Var => todo!(),
+                        t => {
+                            dbg!(t);
+                            todo!();
+                        }
+                    };
+                    sig.params.push(AbiParam::new(cl_type));
+                }
+                let cl_type = match self.types.kind(return_type_id.unwrap()) {
+                    TypeKind::Int => types::I32,
+                    t => {
+                        dbg!(t);
+                        todo!();
+                    }
+                };
+                sig.returns.push(AbiParam::new(cl_type));
+            }
+            _ => unreachable!(),
+        }
         let fid = obj_module.declare_function(&fn_name, Linkage::Export, &sig)?;
+        symbol.cranelift_id = Some(CraneliftId::Func(fid));
+
         let mut func = Function::with_name_signature(UserFuncName::user(0, 0), sig);
         let mut func_ctx = FunctionBuilderContext::new();
         let mut fn_builder = FunctionBuilder::new(&mut func, &mut func_ctx);
@@ -155,6 +191,14 @@ impl<'a> CLExporter<'a> {
         let block = fn_builder.create_block();
         fn_builder.switch_to_block(block);
         fn_builder.seal_block(block);
+        fn_builder.append_block_params_for_function_params(block);
+        for (i, arg) in ast_fn.args.iter().enumerate() {
+            let symb = self.symbols.resolve_mut(arg.symbol_id);
+            symb.cranelift_id = Some(CraneliftId::FnParam {
+                block,
+                param_index: i,
+            });
+        }
 
         let body = match &ast_fn.body {
             None => panic!("fn body was none after being parsed"),
@@ -245,6 +289,9 @@ impl<'a> CLExporter<'a> {
                     let symb = self.symbols.resolve_mut(symbol_id.unwrap());
                     match symb.cranelift_id.unwrap() {
                         CraneliftId::Var(variable) => fn_builder.use_var(variable),
+                        CraneliftId::FnParam { block, param_index } => {
+                            fn_builder.block_params(block)[param_index]
+                        }
                         t => {
                             dbg!(t);
                             panic!();
@@ -349,6 +396,20 @@ impl<'a> CLExporter<'a> {
                     let right_val =
                         self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
                     fn_builder.ins().iadd(left_val, right_val)
+                }
+                Op::Minus { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder.ins().isub(left_val, right_val)
+                }
+                Op::Multiply { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder.ins().imul(left_val, right_val)
                 }
                 Op::Ref(ref_expr) => {
                     // TOOD: this is definietly wrong but it might work for now

@@ -12,13 +12,13 @@ struct Str {
     chars &CStr
 }
 
-// pub fn print_ln(str &Str) Void {
-//     puts(str.chars);
-// }
+fn add(num1 Int, num2 Int) Int {
+    return num1 + num2;
+}
 
 fn main() Int {
-    let foo = 5 ;
-    let bar =  foo + 2;
+    let foo = 5;
+    let bar = add(2, 5);
     printf(&c"hello 1 edited %d
 ", foo + bar);
     puts(&c"hello 2");

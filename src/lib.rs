@@ -47,7 +47,7 @@ impl ModParser {
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),
-            false,
+            true,
             &ast,
             &type_arena,
             &mut symbols,
