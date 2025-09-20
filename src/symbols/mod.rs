@@ -232,8 +232,11 @@ impl SymbolTable {
                     StatementKind::Assignment {
                         ident_id: _,
                         ident_token_at: _,
-                        expr: _,
-                    } => todo!(),
+                        expr,
+                        symbol_id: _,
+                    } => {
+                        self.register_expr(expr);
+                    }
                     StatementKind::Expr(ast_expr) => {
                         self.register_expr(ast_expr);
                     }

@@ -78,8 +78,27 @@ impl<'a> TypeChecker<'a> {
                     StatementKind::Assignment {
                         ident_token_at: _,
                         ident_id: _,
-                        expr: _,
-                    } => todo!(),
+                        symbol_id,
+                        expr,
+                    } => {
+                        let new_type_id = self.check_expr(expr);
+                        let sym = self.symbols.resolve(symbol_id.unwrap());
+                        match &sym.kind {
+                            SymbolKind::Var {
+                                type_id,
+                                is_used: _,
+                                is_mutable: _,
+                            } => {
+                                if let Err(e) = self.arena.unify(type_id.unwrap(), new_type_id) {
+                                    dbg!(e);
+                                    panic!();
+                                }
+                            }
+                            _ => unreachable!(
+                                "Just checked that the statement was a var so the symbol for it should be a var as well"
+                            ),
+                        }
+                    }
                     StatementKind::Expr(ast_expr) => {
                         self.check_expr(ast_expr);
                     }

@@ -257,8 +257,28 @@ impl<'a> CLExporter<'a> {
                 StatementKind::Assignment {
                     ident_id: _,
                     ident_token_at: _,
-                    expr: _,
-                } => todo!(),
+                    expr,
+                    symbol_id,
+                } => {
+                    let symb = self.symbols.resolve_mut(symbol_id.unwrap());
+                    match symb.kind {
+                        SymbolKind::Var {
+                            type_id: _,
+                            is_used: _,
+                            is_mutable: _,
+                        } => {
+                            let cl_var = match symb.cranelift_id.unwrap() {
+                                CraneliftId::Var(cl_var) => cl_var,
+                                _ => unreachable!(),
+                            };
+                            symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                            let cl_val =
+                                self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
+                            fn_builder.def_var(cl_var, cl_val);
+                        }
+                        _ => todo!(),
+                    };
+                }
             }
         }
 

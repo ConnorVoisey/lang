@@ -22,6 +22,7 @@ pub enum StatementKind {
         expr: AstExpr,
     },
     Assignment {
+        symbol_id: Option<SymbolId>,
         ident_id: IdentId,
         ident_token_at: usize,
         expr: AstExpr,
@@ -29,6 +30,12 @@ pub enum StatementKind {
     Expr(AstExpr),
     ExplicitReturn(AstExpr),
     BlockReturn(AstExpr),
+    // IfCond {
+    //     cond: AstExpr,
+    //     block: AstBlock,
+    //     else_ifs: Vec<(AstExpr, AstBlock)>,
+    //     unconditional_else: Option<AstBlock>,
+    // },
 }
 #[derive(Debug)]
 pub struct AstStatement {
@@ -57,8 +64,7 @@ impl Ast {
                 }
                 _ => {
                     if let Some(statement) = self.parse_statement(symbols) {
-                        let need_break =
-                            matches!(&statement.kind, StatementKind::BlockReturn(_));
+                        let need_break = matches!(&statement.kind, StatementKind::BlockReturn(_));
                         statements.push(statement);
                         if need_break {
                             break;
@@ -134,6 +140,44 @@ impl Ast {
             }
             None => {
                 panic!("Unexpected end of input in parse_statement");
+            }
+            Some(Token {
+                kind: TokenKind::Ident(ident_id),
+                ..
+            }) => {
+                let ident_id = *ident_id;
+                let start_token_at = self.curr_token_i();
+                match self.peek_token() {
+                    Some(Token {
+                        kind: TokenKind::Assign,
+                        ..
+                    }) => {
+                        self.next_token();
+                        self.next_token();
+                        Some(AstStatement {
+                            start_token_at,
+                            kind: StatementKind::Assignment {
+                                ident_id,
+                                ident_token_at: start_token_at + 1,
+                                expr: self.parse_expr(0, symbols)?,
+                                symbol_id: symbols.lookup(ident_id),
+                            },
+                        })
+                    }
+                    _ => {
+                        let expr = self.parse_expr(0, symbols)?;
+                        Some(AstStatement {
+                            start_token_at,
+                            kind: match self.curr_token() {
+                                Some(Token {
+                                    kind: TokenKind::CurlyBracketClose,
+                                    ..
+                                }) => StatementKind::BlockReturn(expr),
+                                _ => StatementKind::Expr(expr),
+                            },
+                        })
+                    }
+                }
             }
             _ => {
                 let start_token_at = self.curr_token_i();
