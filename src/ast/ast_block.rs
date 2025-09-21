@@ -30,12 +30,6 @@ pub enum StatementKind {
     Expr(AstExpr),
     ExplicitReturn(AstExpr),
     BlockReturn(AstExpr),
-    // IfCond {
-    //     cond: AstExpr,
-    //     block: AstBlock,
-    //     else_ifs: Vec<(AstExpr, AstBlock)>,
-    //     unconditional_else: Option<AstBlock>,
-    // },
 }
 #[derive(Debug)]
 pub struct AstStatement {
@@ -85,6 +79,9 @@ impl Ast {
     pub fn parse_statement(&mut self, symbols: &mut SymbolTable) -> Option<AstStatement> {
         let start_token_at = self.curr_token_i();
         match self.curr_token() {
+            None => {
+                panic!("Unexpected end of input in parse_statement");
+            }
             Some(Token {
                 kind: TokenKind::LetKeyWord,
                 ..
@@ -137,9 +134,6 @@ impl Ast {
                     start_token_at,
                     kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols)?),
                 })
-            }
-            None => {
-                panic!("Unexpected end of input in parse_statement");
             }
             Some(Token {
                 kind: TokenKind::Ident(ident_id),

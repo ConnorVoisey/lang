@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast, VarType,
-        ast_block::StatementKind,
+        ast_block::{AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
@@ -137,6 +137,7 @@ impl SymbolTable {
         let type_kind = match &mut func.return_type {
             VarType::Void => todo!(),
             VarType::Int => TypeKind::Int,
+            VarType::Bool => TypeKind::Bool,
             VarType::Uint => TypeKind::Uint,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
@@ -220,46 +221,47 @@ impl SymbolTable {
         // register function bodies (locals and expressions)
         if let Some(body) = &mut func.body {
             for statement in &mut body.statements {
-                match &mut statement.kind {
-                    StatementKind::Decleration {
-                        symbol_id: _,
-                        ident_id: _,
-                        ident_token_at: _,
-                        expr,
-                    } => {
-                        self.register_expr(expr);
-                    }
-                    StatementKind::Assignment {
-                        ident_id: _,
-                        ident_token_at: _,
-                        expr,
-                        symbol_id: _,
-                    } => {
-                        self.register_expr(expr);
-                    }
-                    StatementKind::Expr(ast_expr) => {
-                        self.register_expr(ast_expr);
-                    }
-                    StatementKind::ExplicitReturn(ast_expr) => {
-                        self.register_expr(ast_expr);
-                    }
-                    StatementKind::BlockReturn(ast_expr) => {
-                        self.register_expr(ast_expr);
-                    }
-                };
+                self.register_statement(statement);
             }
         }
     }
 
+    pub fn register_statement(&mut self, statement: &mut AstStatement) {
+        match &mut statement.kind {
+            StatementKind::Decleration {
+                symbol_id: _,
+                ident_id: _,
+                ident_token_at: _,
+                expr,
+            } => {
+                self.register_expr(expr);
+            }
+            StatementKind::Assignment {
+                ident_id: _,
+                ident_token_at: _,
+                expr,
+                symbol_id: _,
+            } => {
+                self.register_expr(expr);
+            }
+            StatementKind::Expr(ast_expr) => {
+                self.register_expr(ast_expr);
+            }
+            StatementKind::ExplicitReturn(ast_expr) => {
+                self.register_expr(ast_expr);
+            }
+            StatementKind::BlockReturn(ast_expr) => {
+                self.register_expr(ast_expr);
+            }
+        };
+    }
     pub fn register_expr(&mut self, expr: &mut AstExpr) {
         match &mut expr.kind {
             ExprKind::Atom(atom) => match atom {
                 Atom::Ident((ident_id, symbol_id)) => {
                     *symbol_id = self.lookup(*ident_id);
                 }
-                Atom::Int(_) => (),
-                Atom::Str(_) => (),
-                Atom::CStr(_) => (),
+                _ => (),
             },
             ExprKind::Op(op) => match &mut **op {
                 Op::Add { left, right } => {
@@ -305,14 +307,27 @@ impl SymbolTable {
                     self.register_expr(left);
                     self.register_expr(right);
                 }
-                Op::IfElse {
+                Op::IfCond {
                     condition,
-                    block: _,
-                    else_ifs: _,
-                    else_clause: _,
+                    block,
+                    else_ifs,
+                    unconditional_else,
                 } => {
                     self.register_expr(condition);
-                    todo!("need to register the block and else part");
+                    for statement in block.statements.iter_mut() {
+                        self.register_statement(statement);
+                    }
+                    for else_if in else_ifs.iter_mut() {
+                        self.register_expr(&mut else_if.0);
+                        for statement in &mut else_if.1.statements.iter_mut() {
+                            self.register_statement(statement);
+                        }
+                    }
+                    if let Some(else_block) = unconditional_else {
+                        for statement in else_block.statements.iter_mut() {
+                            self.register_statement(statement);
+                        }
+                    }
                 }
             },
         }
@@ -327,6 +342,7 @@ impl ToTypeKind for VarType {
         match &self {
             VarType::Void => todo!(),
             VarType::Int => TypeKind::Int,
+            VarType::Bool => TypeKind::Bool,
             VarType::Uint => TypeKind::Uint,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,

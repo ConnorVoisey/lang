@@ -16,6 +16,7 @@ pub mod error;
 #[derive(Debug, Clone, PartialEq)]
 pub enum VarType {
     Void,
+    Bool,
     Int,
     Uint,
     Str,

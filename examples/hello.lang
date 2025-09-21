@@ -18,7 +18,11 @@ fn add(num1 Int, num2 Int) Int {
 
 fn main() Int {
     let foo = 5;
-    foo = foo + 20;
+    if false {
+        foo = foo + 20;
+    } else {
+        foo = foo - 20;
+    };
     let bar = add(2, 5);
     printf(&c"hello 1 edited %d
 ", foo + bar);

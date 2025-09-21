@@ -18,6 +18,7 @@ pub struct AstExpr {
 #[derive(Debug)]
 pub enum Atom {
     Ident((IdentId, Option<SymbolId>)),
+    Bool(bool),
     Int(i32),
     Str(usize),
     CStr(usize),
@@ -64,11 +65,11 @@ pub enum Op {
         left: AstExpr,
         right: AstExpr,
     },
-    IfElse {
+    IfCond {
         condition: AstExpr,
         block: AstBlock,
         else_ifs: Vec<(AstExpr, AstBlock)>,
-        else_clause: AstBlock,
+        unconditional_else: Option<AstBlock>,
     },
 }
 
@@ -121,6 +122,18 @@ impl Ast {
                 kind: ExprKind::Atom(Atom::Int(*val)),
                 type_id: None,
             }),
+            TokenKind::FalseKeyWord => Some(AstExpr {
+                start_token_at,
+                end_token_at: self.curr_token_i(),
+                kind: ExprKind::Atom(Atom::Bool(false)),
+                type_id: None,
+            }),
+            TokenKind::TrueKeyWord => Some(AstExpr {
+                start_token_at,
+                end_token_at: self.curr_token_i(),
+                kind: ExprKind::Atom(Atom::Bool(true)),
+                type_id: None,
+            }),
             TokenKind::CStr(_) => Some(AstExpr {
                 start_token_at,
                 end_token_at: self.curr_token_i(),
@@ -170,14 +183,45 @@ impl Ast {
                     "Parsed if condition then didnt have `{{`"
                 );
                 let block = self.parse_block(symbols).expect("Failed to parse if block");
+                let mut else_ifs = vec![];
+                let mut unconditional_else = None;
+                while let Some(token) = self.peek_token() {
+                    match token {
+                        Token {
+                            kind: TokenKind::ElseKeyWord,
+                            ..
+                        } => {
+                            self.next_token();
+                            match self.peek_token() {
+                                Some(Token {
+                                    kind: TokenKind::IfKeyWord,
+                                    ..
+                                }) => {
+                                    let condition = self.parse_expr(0, symbols).unwrap();
+                                    let block = self.parse_block(symbols).unwrap();
+                                    else_ifs.push((condition, block));
+                                }
+                                Some(Token {
+                                    kind: TokenKind::CurlyBracketOpen,
+                                    ..
+                                }) => {
+                                    self.next_token();
+                                    unconditional_else = self.parse_block(symbols);
+                                }
+                                _ => break,
+                            }
+                        }
+                        _ => break,
+                    }
+                }
                 Some(AstExpr {
                     start_token_at,
                     end_token_at: self.curr_token_i(),
-                    kind: ExprKind::Op(Box::new(Op::IfElse {
+                    kind: ExprKind::Op(Box::new(Op::IfCond {
                         condition,
                         block,
-                        else_ifs: todo!(),
-                        else_clause: todo!(),
+                        else_ifs,
+                        unconditional_else,
                     })),
                     type_id: None,
                 })
@@ -367,13 +411,14 @@ impl Ast {
         lhs
     }
 
-    fn expr_to_debug(&self, expr: &AstExpr) -> DebugExprKind {
+    pub fn expr_to_debug(&self, expr: &AstExpr) -> DebugExprKind {
         match &expr.kind {
             ExprKind::Atom(atom) => match atom {
                 Atom::Ident(v) => DebugExprKind::Atom(DebugAtom::Ident(
                     self.interner.read().resolve(v.0).to_string(),
                 )),
                 Atom::Int(v) => DebugExprKind::Atom(DebugAtom::Int(*v)),
+                Atom::Bool(v) => DebugExprKind::Atom(DebugAtom::Bool(*v)),
                 Atom::Str(v) => match &self.tokens[*v].kind {
                     TokenKind::Str(v) => DebugExprKind::Atom(DebugAtom::Str(v.clone())),
                     _ => unreachable!(),
@@ -423,11 +468,11 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
-                Op::IfElse {
+                Op::IfCond {
                     condition,
                     block,
                     else_ifs,
-                    else_clause,
+                    unconditional_else: else_clause,
                 } => todo!(),
             })),
         }
@@ -463,6 +508,7 @@ fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
 pub enum DebugAtom {
     Ident(String),
     Int(i32),
+    Bool(bool),
     Str(String),
     CStr(String),
 }

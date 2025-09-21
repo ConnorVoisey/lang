@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast,
-        ast_block::StatementKind,
+        ast_block::{AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
@@ -205,81 +205,7 @@ impl<'a> CLExporter<'a> {
             Some(body) => body,
         };
         for statement in &body.statements {
-            match &statement.kind {
-                StatementKind::Expr(expr) => {
-                    self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
-                }
-                StatementKind::ExplicitReturn(expr) => {
-                    let cl_val =
-                        self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
-                    fn_builder.ins().return_(&[cl_val]);
-                }
-                StatementKind::BlockReturn(expr) => {
-                    let cl_val =
-                        self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
-                    fn_builder.ins().return_(&[cl_val]);
-                }
-                StatementKind::Decleration {
-                    symbol_id,
-                    ident_id: _,
-                    ident_token_at: _,
-                    expr,
-                } => {
-                    let symb = self.symbols.resolve_mut(*symbol_id);
-                    match symb.kind {
-                        SymbolKind::Var {
-                            type_id,
-                            is_used: _,
-                            is_mutable: _,
-                        } => {
-                            let ty = self.types.kind(type_id.unwrap());
-                            let cl_var = match ty {
-                                TypeKind::Int => fn_builder.declare_var(types::I32),
-                                TypeKind::Uint => todo!(),
-                                TypeKind::Str => todo!(),
-                                TypeKind::CStr => todo!(),
-                                TypeKind::Ref(type_id) => todo!(),
-                                TypeKind::Unknown => todo!(),
-                                TypeKind::Var => todo!(),
-                                t => {
-                                    dbg!(t);
-                                    todo!();
-                                }
-                            };
-                            symb.cranelift_id = Some(CraneliftId::Var(cl_var));
-                            let cl_val =
-                                self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
-                            fn_builder.def_var(cl_var, cl_val);
-                        }
-                        _ => todo!(),
-                    };
-                }
-                StatementKind::Assignment {
-                    ident_id: _,
-                    ident_token_at: _,
-                    expr,
-                    symbol_id,
-                } => {
-                    let symb = self.symbols.resolve_mut(symbol_id.unwrap());
-                    match symb.kind {
-                        SymbolKind::Var {
-                            type_id: _,
-                            is_used: _,
-                            is_mutable: _,
-                        } => {
-                            let cl_var = match symb.cranelift_id.unwrap() {
-                                CraneliftId::Var(cl_var) => cl_var,
-                                _ => unreachable!(),
-                            };
-                            symb.cranelift_id = Some(CraneliftId::Var(cl_var));
-                            let cl_val =
-                                self.expr_to_cl(fid, expr, &mut fn_builder, obj_module, call_conv)?;
-                            fn_builder.def_var(cl_var, cl_val);
-                        }
-                        _ => todo!(),
-                    };
-                }
-            }
+            self.statement_to_cl(fid, statement, &mut fn_builder, obj_module, call_conv)?;
         }
 
         fn_builder.seal_all_blocks();
@@ -300,6 +226,89 @@ impl<'a> CLExporter<'a> {
         Ok(())
     }
 
+    fn statement_to_cl(
+        &mut self,
+        fid: FuncId,
+        statement: &AstStatement,
+        fn_builder: &mut FunctionBuilder,
+        obj_module: &mut ObjectModule,
+        call_conv: CallConv,
+    ) -> color_eyre::Result<()> {
+        match &statement.kind {
+            StatementKind::Expr(expr) => {
+                self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+            }
+            StatementKind::ExplicitReturn(expr) => {
+                let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                fn_builder.ins().return_(&[cl_val]);
+            }
+            StatementKind::BlockReturn(expr) => {
+                let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                fn_builder.ins().return_(&[cl_val]);
+            }
+            StatementKind::Decleration {
+                symbol_id,
+                ident_id: _,
+                ident_token_at: _,
+                expr,
+            } => {
+                let symb = self.symbols.resolve_mut(*symbol_id);
+                match symb.kind {
+                    SymbolKind::Var {
+                        type_id,
+                        is_used: _,
+                        is_mutable: _,
+                    } => {
+                        let ty = self.types.kind(type_id.unwrap());
+                        let cl_var = match ty {
+                            TypeKind::Int => fn_builder.declare_var(types::I32),
+                            TypeKind::Uint => todo!(),
+                            TypeKind::Str => todo!(),
+                            TypeKind::CStr => todo!(),
+                            TypeKind::Ref(type_id) => todo!(),
+                            TypeKind::Unknown => todo!(),
+                            TypeKind::Var => todo!(),
+                            t => {
+                                dbg!(t);
+                                todo!();
+                            }
+                        };
+                        symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                        let cl_val =
+                            self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                        fn_builder.def_var(cl_var, cl_val);
+                    }
+                    _ => todo!(),
+                };
+            }
+            StatementKind::Assignment {
+                ident_id: _,
+                ident_token_at: _,
+                expr,
+                symbol_id,
+            } => {
+                let symb = self.symbols.resolve_mut(symbol_id.unwrap());
+                match symb.kind {
+                    SymbolKind::Var {
+                        type_id: _,
+                        is_used: _,
+                        is_mutable: _,
+                    } => {
+                        let cl_var = match symb.cranelift_id.unwrap() {
+                            CraneliftId::Var(cl_var) => cl_var,
+                            _ => unreachable!(),
+                        };
+                        symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                        let cl_val =
+                            self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                        fn_builder.def_var(cl_var, cl_val);
+                    }
+                    _ => todo!(),
+                };
+            }
+        };
+        Ok(())
+    }
     fn expr_to_cl(
         &mut self,
         callee_func_id: FuncId,
@@ -324,6 +333,7 @@ impl<'a> CLExporter<'a> {
                     }
                 }
                 Atom::Int(int_val) => fn_builder.ins().iconst(types::I32, *int_val as i64),
+                Atom::Bool(val) => fn_builder.ins().iconst(types::I8, *val as i64),
                 Atom::CStr(str_val) => {
                     let c_str_val = match &self.ast.tokens[*str_val].kind {
                         TokenKind::CStr(val) => val,
@@ -447,6 +457,71 @@ impl<'a> CLExporter<'a> {
                     )?;
                     ref_cl_val
                 }
+                Op::IfCond {
+                    condition,
+                    block,
+                    else_ifs,
+                    unconditional_else,
+                } => {
+                    if expr.type_id.is_some() {
+                        todo!("implement if statements returning values in cranelift")
+                    }
+                    if else_ifs.len() > 1 {
+                        todo!("implement else if branches in cranelift")
+                    }
+                    let c = self.expr_to_cl(
+                        callee_func_id,
+                        condition,
+                        fn_builder,
+                        obj_module,
+                        call_conv,
+                    )?;
+
+                    let then_block = fn_builder.create_block();
+                    let else_block = fn_builder.create_block();
+                    let merge_block = fn_builder.create_block();
+
+                    fn_builder.ins().brif(c, then_block, [], else_block, []);
+
+                    fn_builder.switch_to_block(then_block);
+                    fn_builder.seal_block(then_block);
+                    let mut then_return = fn_builder.ins().iconst(types::I32, 0);
+                    for statement in &block.statements {
+                        self.statement_to_cl(
+                            callee_func_id,
+                            statement,
+                            fn_builder,
+                            obj_module,
+                            call_conv,
+                        )?;
+                    }
+
+                    // Jump to the merge block, passing it the block return value.
+                    fn_builder.ins().jump(merge_block, []);
+
+                    fn_builder.switch_to_block(else_block);
+                    fn_builder.seal_block(else_block);
+                    let mut else_return = fn_builder.ins().iconst(types::I32, 0);
+                    for statement in &unconditional_else.as_ref().unwrap().statements {
+                        self.statement_to_cl(
+                            callee_func_id,
+                            statement,
+                            fn_builder,
+                            obj_module,
+                            call_conv,
+                        )?;
+                    }
+
+                    // Jump to the merge block, passing it the block return value.
+                    fn_builder.ins().jump(merge_block, &[]);
+
+                    // Switch to the merge block for subsequent statements.
+                    fn_builder.switch_to_block(merge_block);
+
+                    // We've now seen all the predecessors of the merge block.
+                    fn_builder.seal_block(merge_block);
+                    else_return
+                }
                 t => {
                     dbg!(t);
                     todo!();
@@ -466,6 +541,7 @@ impl ToClType for TypeKind {
         match self {
             TypeKind::Int => types::I32,
             TypeKind::Uint => types::I32,
+            TypeKind::Bool => types::I8,
             TypeKind::Str => todo!(),
             TypeKind::CStr => todo!(),
             TypeKind::Void => todo!(),

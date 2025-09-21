@@ -14,6 +14,7 @@ pub enum TypeKind {
     Str,
     CStr,
     Void,
+    Bool,
     Struct {
         struct_id: usize,
         fields: Vec<(crate::interner::IdentId, TypeId)>,
@@ -44,7 +45,7 @@ pub enum UnifyErrorWithoutSpan {
 impl TypeArena {
     pub fn new() -> Self {
         Self {
-            kinds: Vec::new(),
+            kinds: vec![],
             parent: Vec::new(),
             rank: Vec::new(),
             struct_symbol_to_type: FxHashMap::default(),
