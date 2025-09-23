@@ -1,19 +1,21 @@
 use crate::{
     ast::{
-        Ast, VarType,
+        Ast,
         ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
-    lexer::Span,
     symbols::{SymbolKind, SymbolTable},
-    types::{TypeArena, TypeId, TypeKind, error::UnifyError},
+    type_checker::error::TypeCheckingError,
+    types::{TypeArena, TypeId, TypeKind},
 };
+
+pub mod error;
 
 #[derive(Debug)]
 pub struct TypeChecker<'a> {
     pub arena: &'a mut TypeArena,
-    pub errors: Vec<UnifyError>,
+    pub errors: Vec<TypeCheckingError>,
     pub symbols: &'a mut SymbolTable,
 }
 
@@ -37,34 +39,48 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_func(&mut self, f: &mut AstFunc) {
+        let return_type_id = Some(self.arena.var_type_to_typeid(&f.return_type));
+
         // allocate TypeIds for args
+        let mut param_type_ids = vec![];
+        let mut param_symbols = vec![];
         for arg in &mut f.args {
-            arg.type_id = Some(self.arena.var_type_to_typeid(&arg.var_type));
+            let arg_symb = self.symbols.resolve_mut(arg.symbol_id);
+            param_symbols.push(arg.symbol_id);
+            if let SymbolKind::FnArg { type_id, .. } = &mut arg_symb.kind {
+                *type_id = Some(self.arena.var_type_to_typeid(&arg.var_type));
+                param_type_ids.push(type_id.unwrap());
+            } else {
+                unreachable!()
+            }
         }
-
-        f.return_type_id = Some(self.arena.var_type_to_typeid(&f.return_type));
-
-        // declare function symbol type
         let fn_type = self.arena.alloc(TypeKind::Fn {
-            params: f.args.iter().map(|a| a.type_id.unwrap()).collect(),
-            ret: f.return_type_id.unwrap(),
+            params: param_type_ids,
+            ret: return_type_id.unwrap(),
+            param_symbols,
         });
-        f.type_id = Some(fn_type);
 
         if let Some(body) = &mut f.body {
-            self.check_block(body, f.return_type_id.unwrap());
+            self.check_block(body, return_type_id);
         }
-
-        // unify with symbol table entry (if it already has a type)
-        // e.g., let sym = ast.symbols.resolve(f.symbol_id); unify here
+        let fn_symb = self.symbols.resolve_mut(f.symbol_id);
+        match &mut fn_symb.kind {
+            SymbolKind::Fn {
+                fn_type_id: fn_type_slot,
+                return_type_id: ret_slot,
+            } => {
+                *fn_type_slot = Some(fn_type);
+                *ret_slot = return_type_id;
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn check_statement(
         &mut self,
         statement: &mut AstStatement,
-        return_type_id: TypeId,
+        return_type_id: Option<TypeId>,
     ) -> Option<TypeId> {
-        dbg!(&statement);
         match &mut statement.kind {
             StatementKind::Decleration {
                 ident_token_at: _,
@@ -135,7 +151,11 @@ impl<'a> TypeChecker<'a> {
             }
         }
     }
-    fn check_block(&mut self, block: &mut AstBlock, return_type_id: TypeId) -> Option<TypeId> {
+    fn check_block(
+        &mut self,
+        block: &mut AstBlock,
+        return_type_id: Option<TypeId>,
+    ) -> Option<TypeId> {
         let mut block_return_id = None;
         for statement in block.statements.iter_mut() {
             if let Some(type_id) = self.check_statement(statement, return_type_id) {
@@ -144,7 +164,7 @@ impl<'a> TypeChecker<'a> {
         }
         block_return_id
     }
-    fn check_expr(&mut self, expr: &mut AstExpr, return_type_id: TypeId) -> Option<TypeId> {
+    fn check_expr(&mut self, expr: &mut AstExpr, return_type_id: Option<TypeId>) -> Option<TypeId> {
         match &mut expr.kind {
             ExprKind::Atom(atom) => {
                 expr.type_id = Some(match atom {
@@ -157,7 +177,6 @@ impl<'a> TypeChecker<'a> {
                         match &sym.kind {
                             SymbolKind::Fn {
                                 fn_type_id,
-                                param_type_ids: _,
                                 return_type_id: _,
                             } => fn_type_id.unwrap(),
                             SymbolKind::Var {
@@ -165,10 +184,7 @@ impl<'a> TypeChecker<'a> {
                                 is_used: _,
                                 is_mutable: _,
                             } => type_id.unwrap(),
-                            SymbolKind::Struct {
-                                param_type_ids: _,
-                                struct_id: _,
-                            } => todo!(),
+                            SymbolKind::Struct { struct_id: _ } => todo!(),
                             SymbolKind::FnArg {
                                 type_id,
                                 is_used: _,
@@ -189,31 +205,19 @@ impl<'a> TypeChecker<'a> {
                         let rt = self.check_expr(right, return_type_id).unwrap();
                         let int_t = self.arena.alloc(TypeKind::Int);
                         if let Err(_) = self.arena.unify(lt, int_t) {
-                            self.errors.push(UnifyError::Mismatch {
+                            self.errors.push(TypeCheckingError::Mismatch {
                                 type_a_str: format!("{}", lt.0),
-                                type_a_span: Span {
-                                    start: left.start_token_at,
-                                    end: left.end_token_at,
-                                },
+                                type_a_span: left.span.clone(),
                                 type_b_str: format!("{}", rt.0),
-                                type_b_span: Span {
-                                    start: right.start_token_at,
-                                    end: right.end_token_at,
-                                },
+                                type_b_span: right.span.clone(),
                             });
                         }
                         if let Err(_) = self.arena.unify(rt, int_t) {
-                            self.errors.push(UnifyError::Mismatch {
+                            self.errors.push(TypeCheckingError::Mismatch {
                                 type_a_str: format!("{}", lt.0),
-                                type_a_span: Span {
-                                    start: left.start_token_at,
-                                    end: left.end_token_at,
-                                },
+                                type_a_span: left.span.clone(),
                                 type_b_str: format!("{}", rt.0),
-                                type_b_span: Span {
-                                    start: right.start_token_at,
-                                    end: right.end_token_at,
-                                },
+                                type_b_span: right.span.clone(),
                             });
                         }
                         expr.type_id = Some(int_t);
@@ -223,17 +227,11 @@ impl<'a> TypeChecker<'a> {
                         let t = self.check_expr(inner, return_type_id).unwrap();
                         let int_t = self.arena.alloc(TypeKind::Int);
                         if let Err(_) = self.arena.unify(t, int_t) {
-                            self.errors.push(UnifyError::Mismatch {
+                            self.errors.push(TypeCheckingError::Mismatch {
                                 type_a_str: format!("{}", t.0),
-                                type_a_span: Span {
-                                    start: inner.start_token_at,
-                                    end: inner.end_token_at,
-                                },
+                                type_a_span: inner.span.clone(),
                                 type_b_str: format!("{}", int_t.0),
-                                type_b_span: Span {
-                                    start: inner.start_token_at,
-                                    end: inner.end_token_at,
-                                },
+                                type_b_span: inner.span.clone(),
                             });
                         }
                         expr.type_id = Some(int_t);
@@ -249,29 +247,39 @@ impl<'a> TypeChecker<'a> {
                         let _ = self.check_expr(ident, return_type_id);
                         // TODO: this is a funtion type, not sure how or even if it should be checked,
                         // guess just check that it is a function type
-
-                        let (params_t, ret_t) = match self.arena.kind(ident.type_id.unwrap()) {
-                            // Don't like this clone, it is only a vec of usize, but I don't think it
-                            // should be required
-                            TypeKind::Fn { params, ret } => (params.clone(), *ret),
-                            t => {
-                                dbg!(t);
-                                todo!("handle error, tried calling a non function e.g. 5()");
-                            }
-                        };
+                        let (params_t, param_symbols, ret_t) =
+                            match self.arena.kind(ident.type_id.unwrap()) {
+                                // Don't like this clone, it is only a vec of usize, but I don't think it
+                                // should be required
+                                TypeKind::Fn {
+                                    params,
+                                    ret,
+                                    param_symbols,
+                                } => (params.clone(), param_symbols.clone(), *ret),
+                                t => {
+                                    dbg!(t);
+                                    todo!("handle error, tried calling a non function e.g. 5()");
+                                }
+                            };
                         let arg_types: Vec<_> = args
                             .iter_mut()
-                            .map(|a| self.check_expr(a, return_type_id).unwrap())
+                            .map(|a| (self.check_expr(a, return_type_id).unwrap(), a))
                             .collect();
                         if params_t.len() != arg_types.len() {
                             dbg!(&params_t, &arg_types, ident.type_id, &self.arena);
                             todo!("handle error, invalid arg count to call fn");
                         }
                         for (i, param_t) in params_t.iter().enumerate() {
-                            let arg_t = arg_types[i];
-                            if let Err(e) = self.arena.unify(*param_t, arg_t) {
-                                dbg!(e);
-                                panic!();
+                            if let Some((arg_t, expr)) = arg_types.get(i)
+                                && self.arena.unify(*param_t, *arg_t).is_err()
+                            {
+                                let param_symbol = self.symbols.resolve(param_symbols[i]);
+                                self.errors.push(TypeCheckingError::FnInvalidArg {
+                                    call_type_str: self.arena.id_to_string(*arg_t),
+                                    call_type_span: expr.span.clone(),
+                                    fn_arg_def_str: self.arena.id_to_string(*param_t),
+                                    fn_arg_def_span: param_symbol.span.clone(),
+                                });
                             }
                         }
                         // Expect fn_t to be a function type
@@ -279,7 +287,7 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id
                     }
                     Op::IfCond {
-                        condition,
+                        condition: _,
                         block,
                         else_ifs,
                         unconditional_else,
@@ -295,13 +303,13 @@ impl<'a> TypeChecker<'a> {
                                         panic!("if block was none but else case had a value")
                                     }
                                 }
-                                if let Some(v) = unconditional_else {
-                                    if self.check_block(v, return_type_id).is_some() {
-                                        panic!("if block was none but else case had a value")
-                                    }
+                                if let Some(v) = unconditional_else
+                                    && self.check_block(v, return_type_id).is_some()
+                                {
+                                    panic!("if block was none but else case had a value")
                                 };
                             }
-                            Some(if_id) => {
+                            Some(_) => {
                                 todo!()
                                 // for else_id in else_ifs.iter_mut().map(|(_, else_block)| {
                                 //     self.check_block(else_block, return_type_id)

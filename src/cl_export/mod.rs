@@ -116,8 +116,14 @@ impl<'a> CLExporter<'a> {
         fn_name: &str,
     ) -> ModuleResult<FuncId> {
         let mut sig = module.make_signature();
-        let (params_t, ret_t) = match self.types.kind(func.type_id.unwrap()) {
-            TypeKind::Fn { params, ret } => (params, ret),
+        let fn_symb = self.symbols.resolve(func.symbol_id);
+        let fn_type_id = if let SymbolKind::Fn { fn_type_id, .. } = fn_symb.kind {
+            fn_type_id
+        } else {
+            unreachable!();
+        };
+        let (params_t, ret_t) = match self.types.kind(fn_type_id.unwrap()) {
+            TypeKind::Fn { params, ret, .. } => (params, ret),
             t => unreachable!("extern fn should have a typekind of fn: {t:?}"),
         };
 
@@ -148,39 +154,40 @@ impl<'a> CLExporter<'a> {
 
         let mut sig = Signature::new(call_conv);
         let symbol = self.symbols.resolve_mut(ast_fn.symbol_id);
-        match &symbol.kind {
-            SymbolKind::Fn {
-                fn_type_id: _,
-                param_type_ids,
-                return_type_id,
-            } => {
-                for param_type_id in param_type_ids {
-                    let cl_type = match self.types.kind(param_type_id.unwrap()) {
-                        TypeKind::Int => types::I32,
-                        TypeKind::Uint => todo!(),
-                        TypeKind::Str => todo!(),
-                        TypeKind::CStr => todo!(),
-                        TypeKind::Ref(_) => todo!(),
-                        TypeKind::Unknown => todo!(),
-                        TypeKind::Var => todo!(),
-                        t => {
-                            dbg!(t);
-                            todo!();
-                        }
-                    };
-                    sig.params.push(AbiParam::new(cl_type));
+        let fn_type_id = if let SymbolKind::Fn { fn_type_id, .. } = symbol.kind {
+            fn_type_id
+        } else {
+            unreachable!();
+        };
+        let (params_t, ret_t) = match self.types.kind(fn_type_id.unwrap()) {
+            TypeKind::Fn { params, ret, .. } => (params, ret),
+            t => unreachable!("extern fn should have a typekind of fn: {t:?}"),
+        };
+        for param_type_id in params_t {
+            let cl_type = match self.types.kind(*param_type_id) {
+                TypeKind::Int => types::I32,
+                TypeKind::Uint => todo!(),
+                TypeKind::Str => todo!(),
+                TypeKind::CStr => todo!(),
+                TypeKind::Ref(_) => todo!(),
+                TypeKind::Unknown => todo!(),
+                TypeKind::Var => todo!(),
+                t => {
+                    dbg!(t);
+                    todo!();
                 }
-                let cl_type = match self.types.kind(return_type_id.unwrap()) {
-                    TypeKind::Int => types::I32,
-                    t => {
-                        dbg!(t);
-                        todo!();
-                    }
-                };
-                sig.returns.push(AbiParam::new(cl_type));
-            }
-            _ => unreachable!(),
+            };
+            sig.params.push(AbiParam::new(cl_type));
         }
+        let cl_type = match self.types.kind(*ret_t) {
+            TypeKind::Int => types::I32,
+            t => {
+                dbg!(t);
+                todo!();
+            }
+        };
+        sig.returns.push(AbiParam::new(cl_type));
+
         let fid = obj_module.declare_function(&fn_name, Linkage::Export, &sig)?;
         symbol.cranelift_id = Some(CraneliftId::Func(fid));
 
@@ -340,7 +347,7 @@ impl<'a> CLExporter<'a> {
                         _ => unreachable!("CStr val wasn't mapped to a cstr token"),
                     };
                     let str_msg_id = obj_module.declare_data(
-                        &format!("c_str_{}_{}", "mod-name", expr.start_token_at),
+                        &format!("c_str_{}_{}-{}", "mod-name", expr.span.start, expr.span.end),
                         Linkage::Local,
                         false,
                         false,
@@ -549,7 +556,7 @@ impl ToClType for TypeKind {
                 struct_id: _,
                 fields: _,
             } => todo!(),
-            TypeKind::Fn { params: _, ret: _ } => todo!(),
+            TypeKind::Fn { .. } => todo!(),
             TypeKind::Ref(_) => types::I64,
             TypeKind::Unknown => todo!(),
             TypeKind::Var => todo!(),

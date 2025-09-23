@@ -1,7 +1,7 @@
 use crate::{
     ast::{Ast, VarType, error::AstParseError},
     interner::IdentId,
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
     types::TypeId,
 };
@@ -17,6 +17,7 @@ pub struct AstStruct {
 
 impl Ast {
     pub fn parse_struct(&mut self, symbols: &mut SymbolTable) {
+        let start_token_i = self.curr_token_i();
         assert!(
             matches!(
                 self.curr_token(),
@@ -112,7 +113,10 @@ impl Ast {
                 ident_id,
                 SymbolKind::Struct {
                     struct_id: self.structs.len(),
-                    param_type_ids: vec![],
+                },
+                Span {
+                    start: self.tokens[start_token_i].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
                 },
             ),
             type_id: None,

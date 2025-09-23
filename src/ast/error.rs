@@ -1,7 +1,5 @@
-use crate::{
-    error::{ErrRender, ToErrRender},
-    lexer::Token,
-};
+use crate::{ast::Ast, error::ToDiagnostic, lexer::Token};
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -40,57 +38,59 @@ pub enum AstParseError {
     UnhandledToken { token: Token },
 }
 
-impl ToErrRender for AstParseError {
-    fn to_err_render<'a>(&'a self, src_code: &'a str, file_label: &'a str) -> ErrRender<'a> {
+impl ToDiagnostic for AstParseError {
+    fn to_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
         match self {
-            AstParseError::UnhandledToken { token } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from(
-                    "This case has not been handled for ast parsing yet.",
-                )),
-                src_code,
-                file_label,
-            },
-            AstParseError::ImportDeclaredMultipleTimes { token, str_val: _ } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from("Remove one of them")),
-                src_code,
-                file_label,
-            },
-            AstParseError::ImportExpectedStrOrClose { token } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from(
-                    "Import statements should either be string of the import or a `}` to clone the import block.",
-                )),
-                src_code,
-                file_label,
-            },
-            AstParseError::ImportExpectedCurlyBracketOpen { token } => todo!(),
-            AstParseError::StructExpectedCurlyOpen { token } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from(
-                    "Expected an { after `struct Ident`, e.g. `struct Foo {}",
-                )),
-                src_code,
-                file_label,
-            },
-            AstParseError::StructExpectedIdent { token } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from(
-                    "Expected an identifer after `struct`, e.g. `struct Foo {}",
-                )),
-                src_code,
-                file_label,
-            },
-            t => {
-                dbg!(t);
-                panic!();
-            }
+            AstParseError::UnhandledToken { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, token.span.start..token.span.end)
+                        .with_message("Unhandled token"),
+                ])
+                .with_notes(vec![String::from(
+                    "This token case has not been implemented in the AST parser yet.",
+                )]),
+
+            AstParseError::ImportDeclaredMultipleTimes { token, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, token.span.start..token.span.end)
+                        .with_message("Duplicate import"),
+                ])
+                .with_notes(vec![String::from("Remove one of the imports.")]),
+
+            AstParseError::ImportExpectedStrOrClose { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(
+                    file_id,
+                    token.span.start..token.span.end,
+                )])
+                .with_notes(vec![String::from(
+                    "Import statements must either be a string literal or a closing brace `}`.",
+                )]),
+
+            AstParseError::StructExpectedCurlyOpen { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(
+                    file_id,
+                    token.span.start..token.span.end,
+                )])
+                .with_notes(vec![String::from(
+                    "Expected a `{` after `struct Name`, e.g. `struct Foo {}`.",
+                )]),
+
+            AstParseError::StructExpectedIdent { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(
+                    file_id,
+                    token.span.start..token.span.end,
+                )])
+                .with_notes(vec![String::from(
+                    "Expected an identifier after `struct`, e.g. `struct Foo {}`.",
+                )]),
+
+            // Default: basic diagnostic with message
+            other => Diagnostic::error().with_message(other.to_string()),
         }
     }
 }

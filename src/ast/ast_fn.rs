@@ -1,16 +1,14 @@
 use crate::{
     ast::{Ast, VarType, ast_block::AstBlock, error::AstParseError},
     interner::IdentId,
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
-    types::TypeId,
 };
 
 #[derive(Debug)]
 pub struct AstFnArg {
     pub ident_id: IdentId,
     pub var_type: VarType,
-    pub type_id: Option<TypeId>,
     pub symbol_id: SymbolId,
 }
 
@@ -19,15 +17,14 @@ pub struct AstFunc {
     pub fn_token_at: usize,
     pub ident_id: IdentId,
     pub symbol_id: SymbolId,
-    pub type_id: Option<TypeId>,
     pub args: Vec<AstFnArg>,
     pub return_type: VarType,
-    pub return_type_id: Option<TypeId>,
     pub body: Option<AstBlock>,
 }
 
 impl Ast {
     pub fn parse_fn_dec(&mut self, symbols: &mut SymbolTable) -> Option<AstFunc> {
+        let start_token_i = self.curr_token_i();
         assert!(
             matches!(
                 self.curr_token(),
@@ -93,14 +90,15 @@ impl Ast {
                 ident_id,
                 SymbolKind::Fn {
                     fn_type_id: None,
-                    param_type_ids: vec![],
                     return_type_id: None,
                 },
+                Span {
+                    start: self.tokens[start_token_i].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
             ),
-            type_id: None,
             args,
             return_type,
-            return_type_id: None,
             body: None,
         })
     }
@@ -125,6 +123,7 @@ impl Ast {
                     ..
                 }) => {
                     let ident_id = *id;
+                    let start_token_i = self.curr_token_i();
                     let var_type = self.parse_var_type();
                     args.push(AstFnArg {
                         ident_id,
@@ -135,9 +134,12 @@ impl Ast {
                                 is_used: false,
                                 is_mutable: false,
                             },
+                            Span {
+                                start: self.tokens[start_token_i].span.start,
+                                end: self.tokens[self.curr_token_i()].span.end,
+                            },
                         ),
                         var_type,
-                        type_id: None,
                     });
                     match self.peek_token() {
                         Some(Token {

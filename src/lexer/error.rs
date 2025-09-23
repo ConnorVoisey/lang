@@ -1,7 +1,5 @@
-use crate::{
-    error::{ErrRender, ToErrRender},
-    lexer::Span,
-};
+use crate::{ast::Ast, error::ToDiagnostic, lexer::Span};
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::{io, num::ParseIntError};
 use thiserror::Error;
 
@@ -10,47 +8,48 @@ pub enum LexerError {
     #[error("Failed to read src code file")]
     CannotReadFile(#[from] io::Error),
 
-    #[error("Unclosed string, found {span:?})")]
+    #[error("Unclosed string")]
     UnclosedString { span: Span },
 
-    #[error("Unhandled char case: `{char}`")]
+    #[error("Unhandled character: `{char}`")]
     UnhandledChar { span: Span, char: char },
 
     #[error("Failed to parse digit char array into int")]
     ParseDigitStrToInt(#[from] ParseIntError),
 
-    #[error("unknown data store error")]
+    #[error("Unknown lexer error")]
     Unknown,
 }
 
-impl ToErrRender for LexerError {
-    fn to_err_render<'a>(&'a self, src_code: &'a str, file_label: &'a str) -> ErrRender<'a> {
+impl ToDiagnostic for LexerError {
+    fn to_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
         match self {
-            LexerError::CannotReadFile(_) => todo!(),
-            LexerError::UnclosedString { span } => ErrRender {
-                title: self.to_string(),
-                span: Some(span.clone()),
-                description: Some(String::from("Try closing the string with `\"`")),
-                src_code,
-                file_label,
-            },
-            LexerError::UnhandledChar { span, char: _ } => ErrRender {
-                title: self.to_string(),
-                span: Some(span.clone()),
-                description: None,
-                src_code,
-                file_label,
-            },
-            LexerError::ParseDigitStrToInt(_) => ErrRender {
-                title: self.to_string(),
-                span: None,
-                description: Some(String::from(
-                    "Internal error, should have been able to parse string",
-                )),
-                src_code,
-                file_label,
-            },
-            LexerError::Unknown => todo!(),
+            LexerError::CannotReadFile(_) => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_notes(vec![String::from(
+                    "Check that the source file exists and is readable.",
+                )]),
+
+            LexerError::UnclosedString { span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, span.start..span.end)
+                        .with_message("Unclosed string literal"),
+                ])
+                .with_notes(vec![String::from("Try closing the string with `\"`.")]),
+
+            LexerError::UnhandledChar { span, char } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(file_id, span.start..span.end)])
+                .with_notes(vec![format!("Unhandled character: `{}`", char)]),
+
+            LexerError::ParseDigitStrToInt(_) => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_notes(vec![String::from(
+                    "Internal error: failed to parse digits.",
+                )]),
+
+            LexerError::Unknown => Diagnostic::error().with_message("Unknown lexer error"),
         }
     }
 }

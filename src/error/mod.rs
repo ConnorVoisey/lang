@@ -1,9 +1,6 @@
-use crate::{
-    ast::error::AstParseError,
-    lexer::{Span, error::LexerError},
-    types::error::UnifyError,
-};
-use codespan_reporting::diagnostic::{Diagnostic, Label};
+use crate::type_checker::error::TypeCheckingError;
+use crate::{ast::error::AstParseError, lexer::error::LexerError};
+use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
@@ -21,41 +18,34 @@ pub enum CompliationError {
     AstParseError(Vec<AstParseError>),
 
     #[error("Type Checking error")]
-    TypeCheckingError(Vec<UnifyError>),
+    TypeCheckingError(Vec<TypeCheckingError>),
 
     #[error("unknown data store error")]
     Unknown,
 }
 
-pub trait ToErrRender {
-    fn to_err_render<'a>(&'a self, src_code: &'a str, file_label: &'a str) -> ErrRender<'a>;
+pub trait ToDiagnostic {
+    fn to_diagnostic(&self, file_id: usize) -> Diagnostic<usize>;
 }
 
 impl CompliationError {
-    pub fn display_error(&self, src_code: &str, file_label: &str) {
+    pub fn display(&self, src_code: &str, file_label: &str) {
         let mut files = SimpleFiles::new();
         let file_id = files.add(file_label, src_code);
 
-        let mut errs = vec![];
-        match self {
-            CompliationError::Disconnect(_) => todo!(),
-            CompliationError::LexingError(lexer_errors) => {
-                for err in lexer_errors {
-                    errs.push(err.to_err_render(src_code, file_label));
-                }
+        let diagnostics: Vec<Diagnostic<usize>> = match self {
+            CompliationError::Disconnect(_) => vec![],
+            CompliationError::LexingError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
             }
-            CompliationError::AstParseError(ast_errs) => {
-                for err in ast_errs {
-                    errs.push(err.to_err_render(src_code, file_label));
-                }
+            CompliationError::AstParseError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
             }
-            CompliationError::TypeCheckingError(type_errs) => {
-                for err in type_errs {
-                    errs.push(err.to_err_render(src_code, file_label));
-                }
+            CompliationError::TypeCheckingError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
             }
-            CompliationError::Unknown => todo!(),
-        }
+            CompliationError::Unknown => vec![],
+        };
 
         let writer = StandardStream::stderr(ColorChoice::Always);
         let config = codespan_reporting::term::Config {
@@ -64,27 +54,8 @@ impl CompliationError {
             ..Default::default()
         };
 
-        for err in errs {
-            let mut diagnostic = Diagnostic::error().with_message(err.title);
-            // .with_code("E0308")
-            if let Some(span) = err.span {
-                diagnostic = diagnostic.with_labels(vec![
-                    Label::primary(file_id, span.start..span.end).with_message("Here"),
-                ]);
-            }
-            if let Some(description) = err.description {
-                diagnostic = diagnostic.with_notes(vec![description]);
-            }
-
+        for diagnostic in diagnostics {
             term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
         }
     }
-}
-
-pub struct ErrRender<'a> {
-    pub title: String,
-    pub src_code: &'a str,
-    pub span: Option<Span>,
-    pub file_label: &'a str,
-    pub description: Option<String>,
 }

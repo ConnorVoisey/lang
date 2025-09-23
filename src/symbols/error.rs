@@ -1,7 +1,5 @@
-use crate::{
-    error::{ErrRender, ToErrRender},
-    lexer::Token,
-};
+use crate::{error::ToDiagnostic, lexer::Token};
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -13,22 +11,28 @@ pub enum SymbolError {
     StructDuplicateDefs { token: Token, name: String },
 }
 
-impl ToErrRender for SymbolError {
-    fn to_err_render<'a>(&'a self, src_code: &'a str, file_label: &'a str) -> ErrRender<'a> {
+impl ToDiagnostic for SymbolError {
+    fn to_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
         match self {
-            SymbolError::FnDuplicateDefs { token, name: _ } => ErrRender {
-                title: self.to_string(),
-                span: Some(token.span.clone()),
-                description: Some(String::from(
-                    "A function with this name has already been declared within this scope. Try renaming the function",
-                )),
-                src_code,
-                file_label,
-            },
-            t => {
-                dbg!(t);
-                panic!();
-            }
+            SymbolError::FnDuplicateDefs { token, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, token.span.start..token.span.end)
+                        .with_message("Duplicate function"),
+                ])
+                .with_notes(vec![String::from(
+                    "A function with this name has already been declared. Try renaming it.",
+                )]),
+
+            SymbolError::StructDuplicateDefs { token, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, token.span.start..token.span.end)
+                        .with_message("Duplicate struct"),
+                ])
+                .with_notes(vec![String::from(
+                    "A struct with this name has already been declared. Try renaming it.",
+                )]),
         }
     }
 }

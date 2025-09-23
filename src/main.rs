@@ -13,7 +13,7 @@ fn main() {
     let mod_parser = match ModParser::parse_file(file_path, &shared_interner) {
         Ok(v) => v,
         Err(e) => {
-            e.display_error(src_code, file_path);
+            e.display(src_code, file_path);
             return;
         }
     };

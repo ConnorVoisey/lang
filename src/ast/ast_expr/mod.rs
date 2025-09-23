@@ -1,7 +1,7 @@
 use crate::{
     ast::{Ast, ast_block::AstBlock},
     interner::IdentId,
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolTable},
     types::TypeId,
 };
@@ -10,8 +10,7 @@ pub mod error;
 
 #[derive(Debug)]
 pub struct AstExpr {
-    pub start_token_at: usize,
-    pub end_token_at: usize,
+    pub span: Span,
     pub kind: ExprKind,
     pub type_id: Option<TypeId>,
 }
@@ -110,46 +109,60 @@ impl Ast {
                     .expect("Failed to parse prefix expr");
                 self.next_token_i -= 1;
                 Some(AstExpr {
-                    start_token_at,
+                    span: Span {
+                        start: self.tokens[start_token_at].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
                     kind: ExprKind::Op(Box::new(Op::Neg(rhs))),
-                    end_token_at: self.curr_token_i(),
                     type_id: None,
                 })
             }
             TokenKind::Int(val) => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::Int(*val)),
                 type_id: None,
             }),
             TokenKind::FalseKeyWord => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::Bool(false)),
                 type_id: None,
             }),
             TokenKind::TrueKeyWord => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::Bool(true)),
                 type_id: None,
             }),
             TokenKind::CStr(_) => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::CStr(self.curr_token_i())),
                 type_id: None,
             }),
             TokenKind::Str(_) => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::Str(self.curr_token_i())),
                 type_id: None,
             }),
             // TokenType::Float(val) => UnverExpr::Atom(UnverAtom::Float(*val)),
             TokenKind::Ident(ident_id) => Some(AstExpr {
-                start_token_at,
-                end_token_at: self.curr_token_i(),
+                span: Span {
+                    start: self.tokens[start_token_at].span.start,
+                    end: self.tokens[self.curr_token_i()].span.end,
+                },
                 kind: ExprKind::Atom(Atom::Ident((*ident_id, None))),
                 type_id: None,
             }),
@@ -161,9 +174,11 @@ impl Ast {
                     .expect("Failed to parse prefix expr");
                 self.next_token_i -= 1;
                 Some(AstExpr {
-                    start_token_at,
+                    span: Span {
+                        start: self.tokens[start_token_at].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
                     kind: ExprKind::Op(Box::new(Op::Ref(rhs))),
-                    end_token_at: self.curr_token_i(),
                     type_id: None,
                 })
             }
@@ -215,8 +230,10 @@ impl Ast {
                     }
                 }
                 Some(AstExpr {
-                    start_token_at,
-                    end_token_at: self.curr_token_i(),
+                    span: Span {
+                        start: self.tokens[start_token_at].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
                     kind: ExprKind::Op(Box::new(Op::IfCond {
                         condition,
                         block,
@@ -301,14 +318,33 @@ impl Ast {
                         );
                         self.next_token();
                         Some(AstExpr {
-                            start_token_at,
-                            end_token_at: self.curr_token_i(),
+                            span: Span {
+                                start: self.tokens[start_token_at].span.start,
+                                end: self.tokens[self.curr_token_i()].span.end,
+                            },
                             kind: ExprKind::Op(Box::new(Op::SquareOpen { left: lhs?, args })),
                             type_id: None,
                         })
                     }
                     TokenKind::BracketOpen => {
                         let mut args = vec![];
+
+                        if let Some(Token {
+                            kind: TokenKind::BracketClose,
+                            ..
+                        }) = self.curr_token()
+                        {
+                            self.next_token();
+                            return Some(AstExpr {
+                                span: Span {
+                                    start: self.tokens[start_token_at].span.start,
+                                    end: self.tokens[self.curr_token_i()].span.end,
+                                },
+                                kind: ExprKind::Op(Box::new(Op::FnCall { ident: lhs?, args })),
+                                type_id: None,
+                            });
+                        }
+
                         loop {
                             if let Some(arg) = self.parse_expr(0, symbols) {
                                 args.push(arg);
@@ -325,7 +361,7 @@ impl Ast {
                                     kind: TokenKind::BracketClose,
                                     ..
                                 }) => break,
-                                t => {
+                                _ => {
                                     break;
                                 }
                             };
@@ -342,8 +378,10 @@ impl Ast {
                         );
                         self.next_token();
                         Some(AstExpr {
-                            start_token_at,
-                            end_token_at: self.curr_token_i(),
+                            span: Span {
+                                start: self.tokens[start_token_at].span.start,
+                                end: self.tokens[self.curr_token_i()].span.end,
+                            },
                             kind: ExprKind::Op(Box::new(Op::FnCall { ident: lhs?, args })),
                             type_id: None,
                         })
@@ -397,8 +435,10 @@ impl Ast {
                     }
                 };
                 lhs = Some(AstExpr {
-                    start_token_at,
-                    end_token_at: self.curr_token_i(),
+                    span: Span {
+                        start: self.tokens[start_token_at].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
                     kind: ExprKind::Op(Box::new(kind)),
                     type_id: None,
                 });
@@ -410,7 +450,34 @@ impl Ast {
 
         lhs
     }
+}
 
+fn prefix_binding_power(op_token: &TokenKind) -> ((), u8) {
+    match op_token {
+        TokenKind::Subtract => ((), 5),
+        TokenKind::Amp => ((), 11),
+        _ => panic!("bad op: {:?}", op_token),
+    }
+}
+
+fn postfix_binding_power(op_token: &TokenKind) -> Option<(u8, ())> {
+    let res = match op_token {
+        // Op::PostQuestion |
+        TokenKind::SquareBracketOpen | TokenKind::BracketOpen => (7, ()),
+        _ => return None,
+    };
+    Some(res)
+}
+fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
+    match op_token {
+        TokenKind::Add | TokenKind::Subtract => Some((1, 2)),
+        TokenKind::Astrix | TokenKind::Slash => Some((3, 4)),
+        TokenKind::Dot => Some((10, 9)),
+        _ => None,
+    }
+}
+
+impl Ast {
     pub fn expr_to_debug(&self, expr: &AstExpr) -> DebugExprKind {
         match &expr.kind {
             ExprKind::Atom(atom) => match atom {
@@ -476,31 +543,6 @@ impl Ast {
                 } => todo!(),
             })),
         }
-    }
-}
-
-fn prefix_binding_power(op_token: &TokenKind) -> ((), u8) {
-    match op_token {
-        TokenKind::Subtract => ((), 5),
-        TokenKind::Amp => ((), 11),
-        _ => panic!("bad op: {:?}", op_token),
-    }
-}
-
-fn postfix_binding_power(op_token: &TokenKind) -> Option<(u8, ())> {
-    let res = match op_token {
-        // Op::PostQuestion |
-        TokenKind::SquareBracketOpen | TokenKind::BracketOpen => (7, ()),
-        _ => return None,
-    };
-    Some(res)
-}
-fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
-    match op_token {
-        TokenKind::Add | TokenKind::Subtract => Some((1, 2)),
-        TokenKind::Astrix | TokenKind::Slash => Some((3, 4)),
-        TokenKind::Dot => Some((10, 9)),
-        _ => None,
     }
 }
 

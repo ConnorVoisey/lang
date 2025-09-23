@@ -1,8 +1,5 @@
+use crate::{ast::VarType, symbols::SymbolId};
 use rustc_hash::FxHashMap;
-
-use crate::ast::VarType;
-
-pub mod error;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeId(pub usize);
@@ -21,6 +18,7 @@ pub enum TypeKind {
     },
     Fn {
         params: Vec<TypeId>,
+        param_symbols: Vec<SymbolId>,
         ret: TypeId,
     },
     Ref(TypeId),
@@ -136,10 +134,12 @@ impl TypeArena {
                 TypeKind::Fn {
                     params: p1,
                     ret: r1,
+                    ..
                 },
                 TypeKind::Fn {
                     params: p2,
                     ret: r2,
+                    ..
                 },
             ) => {
                 if p1.len() != p2.len() {
@@ -198,5 +198,25 @@ impl TypeArena {
             VarType::Custom(_) => self.alloc(TypeKind::Unknown), // TODO: resolve to struct symbol
             _ => self.alloc_var(),                               // fallback for inference
         }
+    }
+    pub fn kind_to_string(&self, kind: &TypeKind) -> String {
+        match kind {
+            TypeKind::Int => "Int",
+            TypeKind::Uint => "Uint",
+            TypeKind::Str => "Str",
+            TypeKind::CStr => "CStr",
+            TypeKind::Void => "Void",
+            TypeKind::Bool => "Bool",
+            TypeKind::Struct { .. } => "Struct",
+            TypeKind::Fn { .. } => "Fn",
+            TypeKind::Ref(_) => "Ref",
+            TypeKind::Unknown => "Unknown",
+            TypeKind::Var => "Var",
+        }
+        .to_string()
+    }
+
+    pub fn id_to_string(&self, type_id: TypeId) -> String {
+        self.kind_to_string(self.kind(type_id))
     }
 }

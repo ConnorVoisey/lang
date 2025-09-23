@@ -1,7 +1,7 @@
 use crate::{
     ast::{Ast, ast_expr::AstExpr},
     interner::IdentId,
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
     types::TypeId,
 };
@@ -77,7 +77,7 @@ impl Ast {
     }
 
     pub fn parse_statement(&mut self, symbols: &mut SymbolTable) -> Option<AstStatement> {
-        let start_token_at = self.curr_token_i();
+        let start_token_i = self.curr_token_i();
         match self.curr_token() {
             None => {
                 panic!("Unexpected end of input in parse_statement");
@@ -103,6 +103,10 @@ impl Ast {
                         is_used: false,
                         is_mutable: false,
                     },
+                    Span {
+                        start: self.tokens[start_token_i].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
                 );
                 assert!(
                     matches!(
@@ -116,11 +120,11 @@ impl Ast {
                 );
                 self.next_token();
                 Some(AstStatement {
-                    start_token_at,
+                    start_token_at: start_token_i,
                     kind: StatementKind::Decleration {
                         ident_id,
                         symbol_id,
-                        ident_token_at: start_token_at + 1,
+                        ident_token_at: start_token_i + 1,
                         expr: self.parse_expr(0, symbols)?,
                     },
                 })
@@ -131,7 +135,7 @@ impl Ast {
             }) => {
                 self.next_token();
                 Some(AstStatement {
-                    start_token_at,
+                    start_token_at: start_token_i,
                     kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols)?),
                 })
             }

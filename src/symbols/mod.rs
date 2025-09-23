@@ -7,8 +7,8 @@ use crate::{
     },
     cl_export::CraneliftId,
     interner::{IdentId, SharedInterner},
+    lexer::Span,
     symbols::error::SymbolError,
-    type_checker::TypeChecker,
     types::{TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
@@ -22,7 +22,6 @@ pub struct SymbolId(usize);
 pub enum SymbolKind {
     Fn {
         fn_type_id: Option<TypeId>,
-        param_type_ids: Vec<Option<TypeId>>,
         return_type_id: Option<TypeId>,
     },
     FnArg {
@@ -37,7 +36,6 @@ pub enum SymbolKind {
     },
     Struct {
         struct_id: usize,
-        param_type_ids: Vec<(IdentId, Option<TypeId>)>,
     },
 }
 #[derive(Debug)]
@@ -46,6 +44,7 @@ pub struct Symbol {
     pub scope_depth: usize,
     pub kind: SymbolKind,
     pub cranelift_id: Option<CraneliftId>,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -80,7 +79,7 @@ impl SymbolTable {
         None
     }
 
-    pub fn declare(&mut self, ident_id: IdentId, symbol_kind: SymbolKind) -> SymbolId {
+    pub fn declare(&mut self, ident_id: IdentId, symbol_kind: SymbolKind, span: Span) -> SymbolId {
         let id = SymbolId(self.symbols.len());
         let scope_depth = self.scopes.len() - 1;
         self.symbols.push(Symbol {
@@ -88,6 +87,7 @@ impl SymbolTable {
             kind: symbol_kind,
             scope_depth,
             cranelift_id: None,
+            span,
         });
         let last_scope = self
             .scopes
@@ -172,30 +172,29 @@ impl SymbolTable {
         let return_t = types.alloc(type_kind);
 
         // allocte fn params
-        let params = func
-            .args
-            .iter_mut()
-            .map(|arg| {
-                let symb = self.resolve_mut(arg.symbol_id);
-                let kind = arg.var_type.to_type_kind(types);
-                let new_type_id = types.alloc(kind);
-                match &mut symb.kind {
-                    SymbolKind::FnArg {
-                        type_id,
-                        is_used: _,
-                        is_mutable: _,
-                    } => {
-                        *type_id = Some(new_type_id);
-                    }
-                    _ => unreachable!("fn arg symbol should have tag for fn arg"),
+        let mut params = vec![];
+        let mut param_symbols = vec![];
+        for arg in &func.args {
+            let symb = self.resolve_mut(arg.symbol_id);
+            let kind = arg.var_type.to_type_kind(types);
+            let new_type_id = types.alloc(kind);
+            match &mut symb.kind {
+                SymbolKind::FnArg {
+                    type_id,
+                    is_used: _,
+                    is_mutable: _,
+                } => {
+                    *type_id = Some(new_type_id);
                 }
-                arg.type_id = Some(new_type_id);
-                new_type_id
-            })
-            .collect();
+                _ => unreachable!("fn arg symbol should have tag for fn arg"),
+            }
+            params.push(new_type_id);
+            param_symbols.push(arg.symbol_id);
+        }
 
         let fn_t = types.alloc(TypeKind::Fn {
             params,
+            param_symbols,
             ret: return_t,
         });
 
@@ -204,19 +203,14 @@ impl SymbolTable {
             match &mut fn_symbol.kind {
                 SymbolKind::Fn {
                     fn_type_id,
-                    param_type_ids,
                     return_type_id,
                 } => {
                     *return_type_id = Some(return_t);
                     *fn_type_id = Some(fn_t);
-                    *param_type_ids = func.args.iter().map(|arg| arg.type_id).collect();
                 }
                 t => unreachable!("fn_symbol should always have SymbolKind::Fn, got: {t:?}"),
             }
         }
-
-        // also store into the AST func
-        func.return_type_id = Some(return_t);
 
         // register function bodies (locals and expressions)
         if let Some(body) = &mut func.body {

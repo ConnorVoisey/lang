@@ -1,10 +1,9 @@
-use target_lexicon::Triple;
-
 use crate::{
     ast::Ast, cl_export::CLExporter, error::CompliationError, interner::SharedInterner,
     lexer::Lexer, symbols::SymbolTable, type_checker::TypeChecker, types::TypeArena,
 };
 use std::{fs::read_to_string, process::Command};
+use target_lexicon::Triple;
 
 pub mod ast;
 pub mod cl_export;
