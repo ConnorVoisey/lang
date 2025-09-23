@@ -1,4 +1,4 @@
-use crate::{ast::Ast, error::ToDiagnostic, lexer::Span};
+use crate::{error::ToDiagnostic, lexer::Span};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::{io, num::ParseIntError};
 use thiserror::Error;

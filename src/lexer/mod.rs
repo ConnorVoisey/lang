@@ -1,8 +1,8 @@
 use crate::{
-    interner::{IdentId, Interner, SharedInterner},
+    interner::{IdentId, SharedInterner},
     lexer::error::LexerError,
 };
-use std::{fs::read_to_string, iter::Peekable, str::CharIndices};
+use std::{iter::Peekable, str::CharIndices};
 
 pub mod error;
 

@@ -301,7 +301,7 @@ impl Ast {
                                     kind: TokenKind::SquareBracketClose,
                                     ..
                                 }) => break,
-                                t => {
+                                _ => {
                                     break;
                                 }
                             };
@@ -522,7 +522,7 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
-                Op::Block(ast_block) => todo!(),
+                Op::Block(_) => todo!(),
                 Op::Equivalent { left, right } => DebugOp::Equivalent {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
@@ -535,12 +535,7 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
-                Op::IfCond {
-                    condition,
-                    block,
-                    else_ifs,
-                    unconditional_else: else_clause,
-                } => todo!(),
+                Op::IfCond { .. } => todo!(),
             })),
         }
     }

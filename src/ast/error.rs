@@ -1,4 +1,4 @@
-use crate::{ast::Ast, error::ToDiagnostic, lexer::Token};
+use crate::{error::ToDiagnostic, lexer::Token};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use thiserror::Error;
 

@@ -8,7 +8,7 @@ use crate::{
     interner::SharedInterner,
     lexer::TokenKind,
     symbols::{SymbolKind, SymbolTable},
-    types::{TypeArena, TypeId, TypeKind},
+    types::{TypeArena, TypeKind},
 };
 use cranelift::{
     codegen::{
@@ -272,7 +272,7 @@ impl<'a> CLExporter<'a> {
                             TypeKind::Uint => todo!(),
                             TypeKind::Str => todo!(),
                             TypeKind::CStr => todo!(),
-                            TypeKind::Ref(type_id) => todo!(),
+                            TypeKind::Ref(_) => todo!(),
                             TypeKind::Unknown => todo!(),
                             TypeKind::Var => todo!(),
                             t => {
@@ -492,7 +492,7 @@ impl<'a> CLExporter<'a> {
 
                     fn_builder.switch_to_block(then_block);
                     fn_builder.seal_block(then_block);
-                    let mut then_return = fn_builder.ins().iconst(types::I32, 0);
+                    // let then_return = fn_builder.ins().iconst(types::I32, 0);
                     for statement in &block.statements {
                         self.statement_to_cl(
                             callee_func_id,
@@ -508,7 +508,7 @@ impl<'a> CLExporter<'a> {
 
                     fn_builder.switch_to_block(else_block);
                     fn_builder.seal_block(else_block);
-                    let mut else_return = fn_builder.ins().iconst(types::I32, 0);
+                    let else_return = fn_builder.ins().iconst(types::I32, 0);
                     for statement in &unconditional_else.as_ref().unwrap().statements {
                         self.statement_to_cl(
                             callee_func_id,
