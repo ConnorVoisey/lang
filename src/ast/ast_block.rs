@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Ast, ast_expr::AstExpr},
+    ast::{Ast, ast_expr::AstExpr, error::AstParseError},
     interner::IdentId,
     lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
@@ -80,7 +80,8 @@ impl Ast {
         let start_token_i = self.curr_token_i();
         match self.curr_token() {
             None => {
-                panic!("Unexpected end of input in parse_statement");
+                self.errs.push(AstParseError::UnexpectedEndOfInput);
+                None
             }
             Some(Token {
                 kind: TokenKind::LetKeyWord,

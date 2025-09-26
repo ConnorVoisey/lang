@@ -25,7 +25,7 @@ pub struct AstFunc {
 impl Ast {
     pub fn parse_fn_dec(&mut self, symbols: &mut SymbolTable) -> Option<AstFunc> {
         let start_token_i = self.curr_token_i();
-        assert!(
+        debug_assert!(
             matches!(
                 self.curr_token(),
                 Some(Token {
@@ -69,9 +69,11 @@ impl Ast {
                 kind: TokenKind::BracketOpen,
                 ..
             }) => (),
-            Some(t) => {
-                dbg!(t);
-                todo!();
+            Some(token) => {
+                let t = token.clone();
+                self.errs
+                    .push(AstParseError::FnExpectedParenOpen { token: t });
+                return None;
             }
             None => {
                 self.errs.push(AstParseError::UnexpectedEndOfInput);
@@ -104,7 +106,7 @@ impl Ast {
     }
 
     pub fn parse_fn_args(&mut self, symbols: &mut SymbolTable) -> Vec<AstFnArg> {
-        assert!(
+        debug_assert!(
             matches!(
                 self.curr_token(),
                 Some(Token {
@@ -152,9 +154,15 @@ impl Ast {
                             kind: TokenKind::BracketClose,
                             ..
                         }) => (),
-                        t => {
-                            dbg!(t);
-                            todo!("expected more either `,` or `)`")
+                        Some(token) => {
+                            let t = token.clone();
+                            self.errs
+                                .push(AstParseError::FnExpectedCommaOrClose { token: t });
+                            return args;
+                        }
+                        None => {
+                            self.errs.push(AstParseError::UnexpectedEndOfInput);
+                            return args;
                         }
                     }
                 }
@@ -164,10 +172,14 @@ impl Ast {
                 }) => {
                     return args;
                 }
-                Some(t) => {
-                    dbg!(t);
-                    todo!();
+
+                Some(token) => {
+                    let t = token.clone();
+                    self.errs
+                        .push(AstParseError::FnExpectedParamOrClose { token: t });
+                    return args;
                 }
+
                 None => {
                     return args;
                 }
@@ -175,7 +187,7 @@ impl Ast {
         }
     }
     pub fn parse_fn(&mut self, symbols: &mut SymbolTable) {
-        assert!(
+        debug_assert!(
             matches!(
                 self.curr_token(),
                 Some(Token {
@@ -189,7 +201,7 @@ impl Ast {
         let mut fn_dec = match self.parse_fn_dec(symbols) {
             Some(v) => v,
             None => {
-                panic!("Failed to get fn_dec");
+                return;
             }
         };
 

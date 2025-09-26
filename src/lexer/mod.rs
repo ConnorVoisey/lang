@@ -318,13 +318,20 @@ impl TokenKind {
 }
 #[cfg(test)]
 mod test {
-    use crate::lexer::{Lexer, TokenKind};
+    use crate::{
+        interner::{Interner, SharedInterner},
+        lexer::{Lexer, TokenKind},
+    };
+    use parking_lot::RwLock;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn basic_lexing() {
         let src = "fn test(ident Int, ident_underscore C_Char, c_char Str)".to_string();
-        let tokens = Lexer::from_src_str(src).unwrap().tokens;
+        let interner = Interner::new();
+        let shared_interner = SharedInterner::new(RwLock::new(interner));
+        let tokens = Lexer::from_src_str(&src, &shared_interner).unwrap().tokens;
+        let mut i = shared_interner.write();
         assert_eq!(
             tokens
                 .iter()
@@ -332,16 +339,16 @@ mod test {
                 .collect::<Vec<_>>(),
             vec![
                 TokenKind::FnKeyWord,
-                TokenKind::Ident("test".to_string()),
+                TokenKind::Ident(i.lookup_ident("test")),
                 TokenKind::BracketOpen,
-                TokenKind::Ident("ident".to_string()),
-                TokenKind::Ident("Int".to_string()),
+                TokenKind::Ident(i.lookup_ident("ident")),
+                TokenKind::Ident(i.lookup_ident("Int")),
                 TokenKind::Comma,
-                TokenKind::Ident("ident_underscore".to_string()),
-                TokenKind::Ident("C_Char".to_string()),
+                TokenKind::Ident(i.lookup_ident("ident_underscore")),
+                TokenKind::Ident(i.lookup_ident("C_Char")),
                 TokenKind::Comma,
-                TokenKind::Ident("c_char".to_string()),
-                TokenKind::Ident("Str".to_string()),
+                TokenKind::Ident(i.lookup_ident("c_char")),
+                TokenKind::Ident(i.lookup_ident("Str")),
                 TokenKind::BracketClose,
             ]
         );

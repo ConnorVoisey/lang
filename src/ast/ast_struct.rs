@@ -130,8 +130,11 @@ impl Ast {
 mod test {
     use crate::{
         ast::{Ast, VarType},
+        interner::{Interner, SharedInterner},
         lexer::{Lexer, Token, TokenKind},
+        symbols::SymbolTable,
     };
+    use parking_lot::RwLock;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -142,16 +145,20 @@ mod test {
     chars &CChar
 }"#,
         );
-        let lexer = Lexer::from_src_str(src).unwrap();
-        let mut ast = Ast::new(lexer.tokens);
+        let interner = Interner::new();
+        let shared_interner = SharedInterner::new(RwLock::new(interner));
+        let lexer = Lexer::from_src_str(&src, &shared_interner).unwrap();
+        let mut ast = Ast::new(lexer.tokens, shared_interner.clone());
+        let mut symbols = SymbolTable::new(shared_interner.clone());
         ast.next_token();
-        ast.parse_struct();
+        ast.parse_struct(&mut symbols);
         assert_eq!(ast.structs.len(), 1, "expected 1 struct to be found");
 
+        let mut i = shared_interner.write();
         let struct_val = ast.structs.first().unwrap();
         assert_eq!(
             match &ast.tokens[struct_val.ident_token_at].kind {
-                TokenKind::Ident(ident_val) => ident_val.clone(),
+                TokenKind::Ident(id) => i.resolve(*id).to_string(),
                 t => format!("Expected ident got: {t:?}"),
             },
             "CLikeStr".to_string(),
@@ -163,7 +170,7 @@ mod test {
             .map(|f| {
                 (
                     match &ast.tokens[f.0].kind {
-                        TokenKind::Ident(i) => i.clone(),
+                        TokenKind::Ident(id) => i.resolve(*id).to_string(),
                         t => format!("Expected ident got: {t:?}"),
                     },
                     f.1.clone(),

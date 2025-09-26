@@ -65,7 +65,7 @@ impl Ast {
     }
 
     fn parse_extern_block(&mut self, symbols: &mut SymbolTable) {
-        assert!(
+        debug_assert!(
             matches!(
                 self.curr_token(),
                 Some(Token {
