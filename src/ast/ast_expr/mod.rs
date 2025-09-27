@@ -92,6 +92,20 @@ impl Ast {
         };
 
         let mut lhs = match &cur_token.kind {
+            TokenKind::CurlyBracketOpen => {
+                // '{' expr '}'
+                match self.parse_block(symbols) {
+                    Some(block) => Some(AstExpr {
+                        span: Span {
+                            start: start_token_at,
+                            end: self.curr_token_i(),
+                        },
+                        kind: ExprKind::Op(Box::new(Op::Block(block))),
+                        type_id: None,
+                    }),
+                    None => None,
+                }
+            }
             TokenKind::BracketOpen => {
                 // '(' expr ')'
                 self.next_token();
@@ -341,7 +355,7 @@ impl Ast {
             }
         };
 
-        // advance past the token we just handled (matching your original logic)
+        // advance past the token we just handled
         self.next_token();
 
         // postfix / infix loop
@@ -351,6 +365,7 @@ impl Ast {
                 Some(v) => match &v.kind {
                     t if t.is_op() => t.clone(),
                     TokenKind::BracketClose => break,
+                    TokenKind::CurlyBracketClose => break,
                     TokenKind::SemiColon => break,
                     _ => {
                         // replace panic with a diagnostic and break

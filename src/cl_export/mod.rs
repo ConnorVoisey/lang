@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast,
-        ast_block::{AstStatement, StatementKind},
+        ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
@@ -529,6 +529,20 @@ impl<'a> CLExporter<'a> {
                     fn_builder.seal_block(merge_block);
                     else_return
                 }
+
+                Op::Block(block) => {
+                    match self.block_to_cl(
+                        callee_func_id,
+                        block,
+                        fn_builder,
+                        obj_module,
+                        call_conv,
+                    )? {
+                        Some(v) => v,
+                        None => todo!(),
+                    }
+                }
+
                 t => {
                     dbg!(t);
                     todo!();
@@ -537,6 +551,17 @@ impl<'a> CLExporter<'a> {
         };
 
         Ok(val)
+    }
+
+    fn block_to_cl(
+        &self,
+        callee_func_id: FuncId,
+        block: &AstBlock,
+        fn_builder: &mut FunctionBuilder,
+        obj_module: &mut ObjectModule,
+        call_conv: CallConv,
+    ) -> color_eyre::Result<Option<Value>> {
+        todo!()
     }
 }
 

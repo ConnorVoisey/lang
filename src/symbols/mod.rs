@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast, VarType,
-        ast_block::{AstStatement, StatementKind},
+        ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
@@ -121,7 +121,7 @@ impl SymbolTable {
         &mut self,
         types: &mut TypeArena,
         func: &mut AstFunc,
-        _: &mut Vec<SymbolError>,
+        errors: &mut Vec<SymbolError>,
     ) {
         // We will not hold a long-lived mutable borrow to `self` while we call lookup/resolve.
         // First, ensure the symbol exists and is a function (immutable borrow).
@@ -213,10 +213,14 @@ impl SymbolTable {
         }
 
         // register function bodies (locals and expressions)
-        if let Some(body) = &mut func.body {
-            for statement in &mut body.statements {
-                self.register_statement(statement);
-            }
+        if let Some(block) = &mut func.body {
+            self.register_block(block);
+        }
+    }
+
+    pub fn register_block(&mut self, block: &mut AstBlock) {
+        for statement in &mut block.statements {
+            self.register_statement(statement);
         }
     }
 
@@ -288,7 +292,9 @@ impl SymbolTable {
                     self.register_expr(left);
                     self.register_expr(right);
                 }
-                Op::Block(_) => todo!(),
+                Op::Block(block) => {
+                    self.register_block(block);
+                }
                 Op::Equivalent { left, right } => {
                     self.register_expr(left);
                     self.register_expr(right);

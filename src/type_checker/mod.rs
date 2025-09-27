@@ -287,7 +287,7 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id
                     }
                     Op::IfCond {
-                        condition: _,
+                        condition,
                         block,
                         else_ifs,
                         unconditional_else,
@@ -309,17 +309,21 @@ impl<'a> TypeChecker<'a> {
                                     panic!("if block was none but else case had a value")
                                 };
                             }
-                            Some(_) => {
-                                todo!()
-                                // for else_id in else_ifs.iter_mut().map(|(_, else_block)| {
-                                //     self.check_block(else_block, return_type_id)
-                                // }) {
-                                //     self.arena.unify(if_block_return_id, else_id);
-                                // }
-                                // let else_return_id = match unconditional_else {
-                                //     Some(v) => self.check_block(v, return_type_id),
-                                //     None => None,
-                                // };
+                            Some(t) => {
+                                for else_id in else_ifs.iter_mut() {
+                                    if let Some(else_t) =
+                                        self.check_block(&mut else_id.1, return_type_id)
+                                    {
+                                        if self.arena.unify(t, else_t).is_err() {
+                                            panic!();
+                                        }
+                                    }
+                                }
+                                let else_return_id = match unconditional_else {
+                                    Some(v) => self.check_block(v, return_type_id),
+                                    None => None,
+                                };
+                                // TODO: unify and check all block types are equal
                             }
                         }
                         if_block_return_id
