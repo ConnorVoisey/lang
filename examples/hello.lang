@@ -3,12 +3,8 @@ import {
 }
 
 extern "C" {
-    fn puts(str &CStr) Int;
-    fn printf(str &CStr, val Int) Int;
-}
-
-fn add(num1 Int, num2 Int) Int {
-    num1 + num2
+//    fn puts(str &CStr) Int;
+    fn printf(str &CStr, val Bool) Int;
 }
 
 struct Str {
@@ -17,20 +13,16 @@ struct Str {
 }
 
 
-fn fib(n Int) Int {
-    if true {
-        n
-    } else {
-        5
-    }
+fn fib(n Int) Bool {
+    5 < 3
 }
 
 // fn fib(n Int) Int {
 //     if n < 2 {
-//         return n;
+//         n
 //     } else {
-//         return fib(n - 1) + fib(n - 2);
-//     };
+//         fib(n - 1) + fib(n - 2)
+//     }
 // }
 
 fn main() Int {

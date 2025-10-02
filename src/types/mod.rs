@@ -125,6 +125,7 @@ impl TypeArena {
             | (TypeKind::Uint, TypeKind::Uint)
             | (TypeKind::Str, TypeKind::Str)
             | (TypeKind::CStr, TypeKind::CStr)
+            | (TypeKind::Bool, TypeKind::Bool)
             | (TypeKind::Void, TypeKind::Void) => {
                 self.union(ra, rb);
                 Ok(())
@@ -191,12 +192,13 @@ impl TypeArena {
             VarType::Uint => self.alloc(TypeKind::Uint),
             VarType::Str => self.alloc(TypeKind::Str),
             VarType::CStr => self.alloc(TypeKind::CStr),
+            VarType::Bool => self.alloc(TypeKind::Bool),
             VarType::Ref(inner) => {
                 let inner_id = self.var_type_to_typeid(inner);
                 self.alloc(TypeKind::Ref(inner_id))
             }
-            VarType::Custom(_) => self.alloc(TypeKind::Unknown), // TODO: resolve to struct symbol
-            _ => self.alloc_var(),                               // fallback for inference
+            VarType::Custom(_) => self.alloc(TypeKind::Unknown),
+            VarType::CChar => todo!(),
         }
     }
     pub fn kind_to_string(&self, kind: &TypeKind) -> String {

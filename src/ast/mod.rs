@@ -164,6 +164,7 @@ impl Ast {
                     "Str" => VarType::Str,
                     "CStr" => VarType::CStr,
                     "CChar" => VarType::CChar,
+                    "Bool" => VarType::Bool,
                     _ => VarType::Custom((ident_cloned_2, None)),
                 }
             }

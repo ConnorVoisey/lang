@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub mod error;
+pub mod if_expr;
 
 #[derive(Debug)]
 pub struct AstExpr {
@@ -34,6 +35,22 @@ pub enum Op {
         right: AstExpr,
     },
     Minus {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    LessThan {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    LessThanEq {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    GreaterThan {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    GreaterThanEq {
         left: AstExpr,
         right: AstExpr,
     },
@@ -94,17 +111,14 @@ impl Ast {
         let mut lhs = match &cur_token.kind {
             TokenKind::CurlyBracketOpen => {
                 // '{' expr '}'
-                match self.parse_block(symbols) {
-                    Some(block) => Some(AstExpr {
-                        span: Span {
-                            start: start_token_at,
-                            end: self.curr_token_i(),
-                        },
-                        kind: ExprKind::Op(Box::new(Op::Block(block))),
-                        type_id: None,
-                    }),
-                    None => None,
-                }
+                self.parse_block(symbols).map(|block| AstExpr {
+                    span: Span {
+                        start: start_token_at,
+                        end: self.curr_token_i(),
+                    },
+                    kind: ExprKind::Op(Box::new(Op::Block(block))),
+                    type_id: None,
+                })
             }
             TokenKind::BracketOpen => {
                 // '(' expr ')'
@@ -235,112 +249,7 @@ impl Ast {
                 })
             }
 
-            TokenKind::IfKeyWord => {
-                self.next_token();
-                let condition = match self.parse_expr(0, symbols) {
-                    Some(c) => c,
-                    None => {
-                        let tok = self.curr_token().cloned().unwrap_or(cur_token.clone());
-                        self.errs
-                            .push(AstParseError::IfExpectedCondition { token: tok });
-                        return None;
-                    }
-                };
-
-                // expect '{'
-                match self.curr_token() {
-                    Some(Token {
-                        kind: TokenKind::CurlyBracketOpen,
-                        ..
-                    }) => { /* okay - parse_block will consume it */ }
-                    Some(tok) => {
-                        self.errs
-                            .push(AstParseError::IfExpectedCurlyOpen { token: tok.clone() });
-                        // try to continue; parse_block may fail and add more errors
-                    }
-                    None => {
-                        self.errs.push(AstParseError::UnexpectedEndOfInput);
-                        return None;
-                    }
-                }
-
-                let block = match self.parse_block(symbols) {
-                    Some(b) => b,
-                    None => {
-                        // parse_block will have pushed errors already
-                        return None;
-                    }
-                };
-
-                let mut else_ifs = vec![];
-                let mut unconditional_else = None;
-                while let Some(token) = self.peek_token() {
-                    match token {
-                        Token {
-                            kind: TokenKind::ElseKeyWord,
-                            ..
-                        } => {
-                            self.next_token(); // consume 'else'
-                            match self.peek_token() {
-                                Some(Token {
-                                    kind: TokenKind::IfKeyWord,
-                                    ..
-                                }) => {
-                                    // else if
-                                    self.next_token(); // consume 'if'
-                                    match self.parse_expr(0, symbols) {
-                                        Some(cond) => {
-                                            let blk = match self.parse_block(symbols) {
-                                                Some(b) => b,
-                                                None => {
-                                                    // parse_block pushed errors
-                                                    break;
-                                                }
-                                            };
-                                            else_ifs.push((cond, blk));
-                                        }
-                                        None => {
-                                            // parse_expr pushed an error
-                                            break;
-                                        }
-                                    }
-                                }
-                                Some(Token {
-                                    kind: TokenKind::CurlyBracketOpen,
-                                    ..
-                                }) => {
-                                    self.next_token(); // consume '{'
-                                    unconditional_else = self.parse_block(symbols);
-                                }
-                                _ => {
-                                    // unexpected token after else — record and stop
-                                    if let Some(tok) = self.peek_token().cloned() {
-                                        self.errs.push(AstParseError::UnexpectedTokenInExpr {
-                                            token: tok,
-                                        });
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        _ => break,
-                    }
-                }
-
-                Some(AstExpr {
-                    span: Span {
-                        start: self.tokens[start_token_at].span.start,
-                        end: self.tokens[self.curr_token_i()].span.end,
-                    },
-                    kind: ExprKind::Op(Box::new(Op::IfCond {
-                        condition,
-                        block,
-                        else_ifs,
-                        unconditional_else,
-                    })),
-                    type_id: None,
-                })
-            }
+            TokenKind::IfKeyWord => self.parse_if_expr(symbols, &cur_token, start_token_at),
 
             // default / not handled
             _ => {
@@ -583,6 +492,22 @@ impl Ast {
                             type_id: None,
                         }),
                     },
+                    TokenKind::LessThan => Op::LessThan {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
+                    TokenKind::GreaterThan => Op::GreaterThan {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
                     _ => {
                         // unknown operator - record error
                         if let Some(tok) = self.curr_token().cloned() {
@@ -631,6 +556,10 @@ fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
         TokenKind::Add | TokenKind::Subtract => Some((1, 2)),
         TokenKind::Astrix | TokenKind::Slash => Some((3, 4)),
         TokenKind::Dot => Some((10, 9)),
+        TokenKind::LessThan => Some((11, 12)),
+        TokenKind::LessThanEq => Some((13, 14)),
+        TokenKind::GreaterThan => Some((15, 16)),
+        TokenKind::GreaterThanEq => Some((17, 18)),
         _ => None,
     }
 }
@@ -663,6 +592,22 @@ impl Ast {
                     right: self.expr_to_debug(right),
                 },
                 Op::Minus { left, right } => DebugOp::Minus {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
+                Op::LessThan { left, right } => DebugOp::LessThan {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
+                Op::LessThanEq { left, right } => DebugOp::LessThanEq {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
+                Op::GreaterThan { left, right } => DebugOp::GreaterThan {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
+                Op::GreaterThanEq { left, right } => DebugOp::GreaterThanEq {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
@@ -727,6 +672,22 @@ pub enum DebugOp {
         left: DebugExprKind,
         right: DebugExprKind,
     },
+    LessThan {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
+    LessThanEq {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
+    GreaterThan {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
+    GreaterThanEq {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
     Neg(DebugExprKind),
     Ref(DebugExprKind),
     Multiply {
@@ -781,7 +742,7 @@ mod test {
 
     #[test]
     fn basic_expr() {
-        let debug_expr = parse_debug("1 + 2 - 3 * 4 / 5");
+        let debug_expr = parse_debug("1 + 2 - 3 * 4 / 5;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Minus {
             left: DebugExprKind::Op(Box::new(DebugOp::Add {
                 left: DebugExprKind::Atom(DebugAtom::Int(1)),
@@ -800,7 +761,7 @@ mod test {
 
     #[test]
     fn bracketed() {
-        let debug_expr = parse_debug("(1 + (2 - 3) * (4 / 5))");
+        let debug_expr = parse_debug("(1 + (2 - 3) * (4 / 5));");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
             left: DebugExprKind::Atom(DebugAtom::Int(1)),
             right: DebugExprKind::Op(Box::new(DebugOp::Multiply {
@@ -819,7 +780,7 @@ mod test {
 
     #[test]
     fn squared_brackets() {
-        let debug_expr = parse_debug("foo[5 - 1]");
+        let debug_expr = parse_debug("foo[5 - 1];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
             left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             args: vec![DebugExprKind::Op(Box::new(DebugOp::Minus {
@@ -832,7 +793,7 @@ mod test {
 
     #[test]
     fn multi_squared_brackets() {
-        let debug_expr = parse_debug("foo[5 - 1][2][bar]");
+        let debug_expr = parse_debug("foo[5 - 1][2][bar];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
             left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
                 left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
@@ -851,7 +812,7 @@ mod test {
 
     #[test]
     fn multi_array() {
-        let debug_expr = parse_debug("foo[5 - 1, 2, 12390][2]");
+        let debug_expr = parse_debug("foo[5 - 1, 2, 12390][2];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
             left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
                 left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
@@ -871,7 +832,7 @@ mod test {
 
     #[test]
     fn fn_call() {
-        let debug_expr = parse_debug("foo(bar) + 5");
+        let debug_expr = parse_debug("foo(bar) + 5;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
             left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
                 ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
@@ -884,7 +845,7 @@ mod test {
 
     #[test]
     fn fn_call_multi_param() {
-        let debug_expr = parse_debug("foo(bar, baz, 5)");
+        let debug_expr = parse_debug("foo(bar, baz, 5);");
         let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
             ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             args: vec![
@@ -897,7 +858,7 @@ mod test {
     }
     #[test]
     fn unary_negation() {
-        let debug_expr = parse_debug("-42");
+        let debug_expr = parse_debug("-42;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Atom(
             DebugAtom::Int(42),
         ))));
@@ -905,8 +866,18 @@ mod test {
     }
 
     #[test]
+    fn less_than() {
+        let debug_expr = parse_debug("5 < 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::LessThan {
+            left: DebugExprKind::Atom(DebugAtom::Int(5)),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
     fn double_negation() {
-        let debug_expr = parse_debug("--5");
+        let debug_expr = parse_debug("--5;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Op(Box::new(
             DebugOp::Neg(DebugExprKind::Atom(DebugAtom::Int(5))),
         )))));
@@ -914,7 +885,7 @@ mod test {
     }
     #[test]
     fn precedence_mixed() {
-        let debug_expr = parse_debug("1 + 2 * 3 + 4");
+        let debug_expr = parse_debug("1 + 2 * 3 + 4;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
             left: DebugExprKind::Op(Box::new(DebugOp::Add {
                 left: DebugExprKind::Atom(DebugAtom::Int(1)),
@@ -929,7 +900,7 @@ mod test {
     }
     #[test]
     fn nested_fn_calls() {
-        let debug_expr = parse_debug("foo(bar(baz), 1)");
+        let debug_expr = parse_debug("foo(bar(baz), 1);");
         let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
             ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             args: vec![
@@ -945,7 +916,7 @@ mod test {
 
     #[test]
     fn chained_dots() {
-        let debug_expr = parse_debug("foo.bar.baz.last");
+        let debug_expr = parse_debug("foo.bar.baz.last;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Dot {
             left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             right: DebugExprKind::Op(Box::new(DebugOp::Dot {
@@ -961,7 +932,7 @@ mod test {
 
     #[test]
     fn mixed_call_index_dot() {
-        let debug_expr = parse_debug("foo(bar)[baz].qux");
+        let debug_expr = parse_debug("foo(bar)[baz].qux;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Dot {
             left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
                 left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
@@ -976,7 +947,7 @@ mod test {
     }
     #[test]
     fn string_and_cstr_literals() {
-        let debug_expr = parse_debug(r#"foo("bar", c"baz")"#);
+        let debug_expr = parse_debug(r#"foo("bar", c"baz");"#);
         let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
             ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             args: vec![

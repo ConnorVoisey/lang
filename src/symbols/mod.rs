@@ -5,7 +5,7 @@ use crate::{
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
-    cl_export::CraneliftId,
+    cl_export::cl_vals::CraneliftId,
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
@@ -160,6 +160,7 @@ impl SymbolTable {
                         "Uint" => TypeKind::Uint,
                         "Str" => TypeKind::Str,
                         "CStr" => TypeKind::CStr,
+                        "Bool" => TypeKind::Bool,
                         // "CChar" => TypeKind::CChar,
                         _ => TypeKind::Unknown,
                     },
@@ -271,6 +272,22 @@ impl SymbolTable {
                     self.register_expr(right);
                 }
                 Op::Minus { left, right } => {
+                    self.register_expr(left);
+                    self.register_expr(right);
+                }
+                Op::LessThan { left, right } => {
+                    self.register_expr(left);
+                    self.register_expr(right);
+                }
+                Op::LessThanEq { left, right } => {
+                    self.register_expr(left);
+                    self.register_expr(right);
+                }
+                Op::GreaterThan { left, right } => {
+                    self.register_expr(left);
+                    self.register_expr(right);
+                }
+                Op::GreaterThanEq { left, right } => {
                     self.register_expr(left);
                     self.register_expr(right);
                 }

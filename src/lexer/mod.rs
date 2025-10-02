@@ -26,7 +26,9 @@ pub enum TokenKind {
     CurlyBracketOpen,
     CurlyBracketClose,
     GreaterThan,
+    GreaterThanEq,
     LessThan,
+    LessThanEq,
     Astrix,
     Slash,
     Add,
@@ -115,8 +117,6 @@ impl<'src> Lexer<'src> {
                 ')' => TokenKind::BracketClose,
                 '{' => TokenKind::CurlyBracketOpen,
                 '}' => TokenKind::CurlyBracketClose,
-                '>' => TokenKind::GreaterThan,
-                '<' => TokenKind::LessThan,
                 '*' => TokenKind::Astrix,
                 '/' => match chars.peek() {
                     Some(&(_, '/')) => {
@@ -130,6 +130,20 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
                     _ => TokenKind::Slash,
+                },
+                '>' => match chars.peek() {
+                    Some(&(_, '=')) => {
+                        chars.next();
+                        TokenKind::GreaterThanEq
+                    }
+                    _ => TokenKind::GreaterThan,
+                },
+                '<' => match chars.peek() {
+                    Some(&(_, '=')) => {
+                        chars.next();
+                        TokenKind::LessThanEq
+                    }
+                    _ => TokenKind::LessThan,
                 },
                 '+' => TokenKind::Add,
                 '-' => TokenKind::Subtract,

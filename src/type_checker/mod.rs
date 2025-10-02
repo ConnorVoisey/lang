@@ -39,7 +39,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_func(&mut self, f: &mut AstFunc) {
-        let return_type_id = Some(self.arena.var_type_to_typeid(&f.return_type));
+        let return_type_id = self.arena.var_type_to_typeid(&f.return_type);
 
         // allocate TypeIds for args
         let mut param_type_ids = vec![];
@@ -56,12 +56,12 @@ impl<'a> TypeChecker<'a> {
         }
         let fn_type = self.arena.alloc(TypeKind::Fn {
             params: param_type_ids,
-            ret: return_type_id.unwrap(),
+            ret: return_type_id,
             param_symbols,
         });
 
         if let Some(body) = &mut f.body {
-            self.check_block(body, return_type_id);
+            self.check_block(body, Some(return_type_id));
         }
         let fn_symb = self.symbols.resolve_mut(f.symbol_id);
         match &mut fn_symb.kind {
@@ -70,7 +70,7 @@ impl<'a> TypeChecker<'a> {
                 return_type_id: ret_slot,
             } => {
                 *fn_type_slot = Some(fn_type);
-                *ret_slot = return_type_id;
+                *ret_slot = Some(return_type_id);
             }
             _ => unreachable!(),
         }

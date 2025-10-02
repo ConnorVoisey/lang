@@ -5,6 +5,7 @@ use crate::{
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
     },
+    cl_export::cl_vals::{ClVals, CraneliftId},
     interner::SharedInterner,
     lexer::TokenKind,
     symbols::{SymbolKind, SymbolTable},
@@ -27,12 +28,7 @@ use std::path::PathBuf;
 use std::{fs, io::Write};
 use target_lexicon::Triple;
 
-#[derive(Copy, Clone, Debug)]
-pub enum CraneliftId {
-    Func(FuncId),
-    FnParam { block: Block, param_index: usize },
-    Var(Variable),
-}
+pub mod cl_vals;
 
 pub struct CLExporter<'a> {
     interner: SharedInterner,
@@ -41,6 +37,7 @@ pub struct CLExporter<'a> {
     ast: &'a Ast,
     types: &'a TypeArena,
     symbols: &'a mut SymbolTable,
+    cl_vals: ClVals,
     func_defs_in_funcs: FxHashMap<FnInFn, FuncRef>,
 }
 
@@ -67,6 +64,7 @@ impl<'a> CLExporter<'a> {
             types,
             symbols,
             func_defs_in_funcs: FxHashMap::default(),
+            cl_vals: ClVals::default(),
         }
     }
 
@@ -82,6 +80,7 @@ impl<'a> CLExporter<'a> {
     fn compile(&mut self) -> color_eyre::Result<ObjectProduct> {
         let mut shared_builder = settings::builder();
         shared_builder.enable("is_pic")?;
+        shared_builder.set("opt_level", "speed")?;
         let shared_flags = settings::Flags::new(shared_builder);
 
         let isa_builder = isa::lookup(self.target_triple.clone())?;
@@ -99,7 +98,7 @@ impl<'a> CLExporter<'a> {
                 .parse_extern_fn(&mut obj_module, &extern_fn, fn_name)
                 .expect("Failed to build extern fn into cl func id");
             let symb = self.symbols.resolve_mut(extern_fn.symbol_id);
-            symb.cranelift_id = Some(CraneliftId::Func(cl_func));
+            symb.cranelift_id = Some(CraneliftId::FnId(self.cl_vals.insert_fn(cl_func)));
         }
 
         for func in self.ast.fns.iter() {
@@ -166,12 +165,6 @@ impl<'a> CLExporter<'a> {
         for param_type_id in params_t {
             let cl_type = match self.types.kind(*param_type_id) {
                 TypeKind::Int => types::I32,
-                TypeKind::Uint => todo!(),
-                TypeKind::Str => todo!(),
-                TypeKind::CStr => todo!(),
-                TypeKind::Ref(_) => todo!(),
-                TypeKind::Unknown => todo!(),
-                TypeKind::Var => todo!(),
                 t => {
                     dbg!(t);
                     todo!();
@@ -181,6 +174,7 @@ impl<'a> CLExporter<'a> {
         }
         let cl_type = match self.types.kind(*ret_t) {
             TypeKind::Int => types::I32,
+            TypeKind::Bool => types::I8,
             t => {
                 dbg!(t);
                 todo!();
@@ -189,7 +183,7 @@ impl<'a> CLExporter<'a> {
         sig.returns.push(AbiParam::new(cl_type));
 
         let fid = obj_module.declare_function(&fn_name, Linkage::Export, &sig)?;
-        symbol.cranelift_id = Some(CraneliftId::Func(fid));
+        symbol.cranelift_id = Some(CraneliftId::FnId(self.cl_vals.insert_fn(fid)));
 
         let mut func = Function::with_name_signature(UserFuncName::user(0, 0), sig);
         let mut func_ctx = FunctionBuilderContext::new();
@@ -201,10 +195,9 @@ impl<'a> CLExporter<'a> {
         fn_builder.append_block_params_for_function_params(block);
         for (i, arg) in ast_fn.args.iter().enumerate() {
             let symb = self.symbols.resolve_mut(arg.symbol_id);
-            symb.cranelift_id = Some(CraneliftId::FnParam {
-                block,
-                param_index: i,
-            });
+            symb.cranelift_id = Some(CraneliftId::FnParamId(
+                self.cl_vals.insert_fn_param(block, i),
+            ));
         }
 
         let body = match &ast_fn.body {
@@ -280,7 +273,8 @@ impl<'a> CLExporter<'a> {
                                 todo!();
                             }
                         };
-                        symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                        symb.cranelift_id =
+                            Some(CraneliftId::VarId(self.cl_vals.insert_var(cl_var)));
                         let cl_val =
                             self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
                         fn_builder.def_var(cl_var, cl_val);
@@ -301,14 +295,15 @@ impl<'a> CLExporter<'a> {
                         is_used: _,
                         is_mutable: _,
                     } => {
-                        let cl_var = match symb.cranelift_id.unwrap() {
-                            CraneliftId::Var(cl_var) => cl_var,
+                        let cl_var_id = match symb.cranelift_id.unwrap() {
+                            CraneliftId::VarId(cl_var_id) => cl_var_id,
                             _ => unreachable!(),
                         };
-                        symb.cranelift_id = Some(CraneliftId::Var(cl_var));
+                        symb.cranelift_id = Some(CraneliftId::VarId(cl_var_id));
                         let cl_val =
                             self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
-                        fn_builder.def_var(cl_var, cl_val);
+                        let cl_var = self.cl_vals.get_var(cl_var_id);
+                        fn_builder.def_var(*cl_var, cl_val);
                     }
                     _ => todo!(),
                 };
@@ -329,8 +324,11 @@ impl<'a> CLExporter<'a> {
                 Atom::Ident((_, symbol_id)) => {
                     let symb = self.symbols.resolve_mut(symbol_id.unwrap());
                     match symb.cranelift_id.unwrap() {
-                        CraneliftId::Var(variable) => fn_builder.use_var(variable),
-                        CraneliftId::FnParam { block, param_index } => {
+                        CraneliftId::VarId(cl_var_id) => {
+                            fn_builder.use_var(*self.cl_vals.get_var(cl_var_id))
+                        }
+                        CraneliftId::FnParamId(cl_fn_param_id) => {
+                            let (block, param_index) = *self.cl_vals.get_fn_param(cl_fn_param_id);
                             fn_builder.block_params(block)[param_index]
                         }
                         t => {
@@ -392,22 +390,22 @@ impl<'a> CLExporter<'a> {
                         }
                         t => panic!("tried calling a funtion with an ident that was {:?}", t),
                     };
-                    let cl_func_id = match ident_symb.cranelift_id {
-                        Some(CraneliftId::Func(v)) => v,
+                    let cl_fn_id = match ident_symb.cranelift_id {
+                        Some(CraneliftId::FnId(v)) => v,
                         t => unreachable!(
                             "got a none cranelift function id for function symbol: {t:?}"
                         ),
                     };
 
+                    let cl_fn = self.cl_vals.get_fn(cl_fn_id);
                     let fn_in_fn = FnInFn {
                         from: callee_func_id,
-                        calling: cl_func_id,
+                        calling: *cl_fn,
                     };
                     let local_fn = match self.func_defs_in_funcs.get(&fn_in_fn) {
                         Some(v) => *v,
                         None => {
-                            let local_fn =
-                                obj_module.declare_func_in_func(cl_func_id, fn_builder.func);
+                            let local_fn = obj_module.declare_func_in_func(*cl_fn, fn_builder.func);
                             self.func_defs_in_funcs.insert(fn_in_fn, local_fn);
                             local_fn
                         }
@@ -452,6 +450,42 @@ impl<'a> CLExporter<'a> {
                     let right_val =
                         self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
                     fn_builder.ins().imul(left_val, right_val)
+                }
+                Op::LessThan { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder
+                        .ins()
+                        .icmp(IntCC::SignedLessThan, left_val, right_val)
+                }
+                Op::LessThanEq { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder
+                        .ins()
+                        .icmp(IntCC::SignedLessThanOrEqual, left_val, right_val)
+                }
+                Op::GreaterThan { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThan, left_val, right_val)
+                }
+                Op::GreaterThanEq { left, right } => {
+                    let left_val =
+                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
+                    let right_val =
+                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
+                    fn_builder
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val)
                 }
                 Op::Ref(ref_expr) => {
                     // TOOD: this is definietly wrong but it might work for now

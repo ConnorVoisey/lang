@@ -39,7 +39,6 @@ pub struct AstStatement {
 
 impl Ast {
     pub fn parse_block(&mut self, symbols: &mut SymbolTable) -> Option<AstBlock> {
-        dbg!(self.curr_token());
         debug_assert!(
             matches!(
                 self.curr_token(),
