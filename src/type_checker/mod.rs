@@ -336,7 +336,10 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = if_block_return_id;
                         if_block_return_id
                     }
-                    Op::LessThan { left, right } => {
+                    Op::LessThan { left, right }
+                    | Op::LessThanEq { left, right }
+                    | Op::GreaterThan { left, right }
+                    | Op::GreaterThanEq { left, right } => {
                         let int_type = self.arena.alloc(TypeKind::Int);
                         let left_type_id = self
                             .check_expr(left, return_type_id)
@@ -344,17 +347,21 @@ impl<'a> TypeChecker<'a> {
                         if self.arena.unify(left_type_id, int_type).is_err() {
                             panic!();
                         }
+                        let right_type_id = self
+                            .check_expr(right, return_type_id)
+                            .expect("right hand side of < expression did not have a type");
+                        if self.arena.unify(right_type_id, int_type).is_err() {
+                            panic!();
+                        }
                         Some(self.arena.alloc(TypeKind::Bool))
                     }
-                    Op::LessThanEq { left, right } => todo!(),
-                    Op::GreaterThan { left, right } => todo!(),
-                    Op::GreaterThanEq { left, right } => todo!(),
                     Op::Dot { left, right } => todo!(),
                     Op::Block(ast_block) => {
                         let type_id = self.check_block(ast_block, return_type_id);
                         expr.type_id = type_id;
                         type_id
                     }
+
                     Op::Equivalent { left, right } => todo!(),
                     Op::SquareOpen { left, args } => todo!(),
                     Op::BracketOpen { left, right } => todo!(),
