@@ -111,7 +111,7 @@ impl Ast {
         let mut lhs = match &cur_token.kind {
             TokenKind::CurlyBracketOpen => {
                 // '{' expr '}'
-                self.parse_block(symbols).map(|block| AstExpr {
+                self.parse_block(symbols, false).map(|block| AstExpr {
                     span: Span {
                         start: start_token_at,
                         end: self.curr_token_i(),

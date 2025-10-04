@@ -206,7 +206,7 @@ impl Ast {
         };
 
         self.next_token();
-        fn_dec.body = self.parse_block(symbols);
+        fn_dec.body = self.parse_block(symbols, true);
         self.fns.push(fn_dec);
     }
 }

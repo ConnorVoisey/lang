@@ -249,8 +249,8 @@ impl SymbolTable {
             StatementKind::ExplicitReturn(ast_expr) => {
                 self.register_expr(ast_expr);
             }
-            StatementKind::BlockReturn(ast_expr) => {
-                self.register_expr(ast_expr);
+            StatementKind::BlockReturn { expr, .. } => {
+                self.register_expr(expr);
             }
         };
     }

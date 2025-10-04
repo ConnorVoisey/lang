@@ -141,13 +141,15 @@ impl<'a> TypeChecker<'a> {
                 }
                 Some(return_type_id)
             }
-            StatementKind::BlockReturn(ast_expr) => {
-                let return_type_id = self.check_expr(ast_expr, return_type_id).unwrap();
-                if let Err(e) = self.arena.unify(return_type_id, return_type_id) {
-                    dbg!(e);
-                    panic!();
+            StatementKind::BlockReturn { expr, is_fn_return } => {
+                let block_return_id = self.check_expr(expr, return_type_id).unwrap();
+                if *is_fn_return {
+                    if let Err(e) = self.arena.unify(block_return_id, return_type_id.unwrap()) {
+                        dbg!(e);
+                        panic!();
+                    }
                 }
-                Some(return_type_id)
+                Some(block_return_id)
             }
         }
     }

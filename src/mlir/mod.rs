@@ -1,7 +1,10 @@
+use rustc_hash::FxHashMap;
+
 use crate::{
     ast::{
         Ast,
         ast_block::{AstStatement, StatementKind},
+        ast_expr::{AstExpr, Atom, ExprKind, Op},
     },
     interner::{IdentId, SharedInterner},
     mlir::func::FunctionBuilder,
@@ -43,6 +46,7 @@ pub struct Function {
     entry: BlockId,
     locals: Vec<LocalSlot>,
     metadata: FuncMetadata,
+    symbols: FxHashMap<SymbolId, ValueId>,
 }
 
 // Basic block
@@ -173,19 +177,65 @@ impl<'a> Module<'a> {
         match statement_kind {
             StatementKind::Decleration {
                 symbol_id,
-                ident_id,
-                ident_token_at,
+                ident_id: _,
+                ident_token_at: _,
                 expr,
-            } => {}
+            } => {
+                if let Some(value_id) = self.parse_expr(fb, expr) {
+                    fb.assign_symbol(*symbol_id, value_id);
+                }
+            }
             StatementKind::Assignment {
                 symbol_id,
-                ident_id,
-                ident_token_at,
+                ident_id: _,
+                ident_token_at: _,
                 expr,
-            } => todo!(),
-            StatementKind::Expr(ast_expr) => todo!(),
+            } => {
+                if let Some(value_id) = self.parse_expr(fb, expr) {
+                    fb.assign_symbol(symbol_id.unwrap(), value_id);
+                }
+            }
+            StatementKind::Expr(ast_expr) => {
+                self.parse_expr(fb, ast_expr);
+            }
             StatementKind::ExplicitReturn(ast_expr) => todo!(),
-            StatementKind::BlockReturn(ast_expr) => todo!(),
+            StatementKind::BlockReturn { expr, is_fn_return } => todo!(),
+        }
+    }
+
+    fn parse_expr(&self, fb: &mut FunctionBuilder<'_>, expr: &AstExpr) -> Option<ValueId> {
+        match &expr.kind {
+            ExprKind::Atom(atom) => match atom {
+                Atom::Ident(_) => todo!(),
+                Atom::Bool(_) => todo!(),
+                Atom::Int(_) => todo!(),
+                Atom::Str(_) => todo!(),
+                Atom::CStr(_) => todo!(),
+            },
+            ExprKind::Op(op) => match &**op {
+                Op::Add { left, right } => todo!(),
+                Op::Divide { left, right } => todo!(),
+                Op::Minus { left, right } => todo!(),
+                Op::LessThan { left, right } => todo!(),
+                Op::LessThanEq { left, right } => todo!(),
+                Op::GreaterThan { left, right } => todo!(),
+                Op::GreaterThanEq { left, right } => todo!(),
+                Op::Neg(ast_expr) => todo!(),
+                Op::Ref(ast_expr) => todo!(),
+                Op::Multiply { left, right } => todo!(),
+                Op::FnCall { ident, args } => todo!(),
+                Op::Dot { left, right } => todo!(),
+                Op::Block(ast_block) => todo!(),
+                Op::Equivalent { left, right } => todo!(),
+                Op::SquareOpen { left, args } => todo!(),
+                Op::BracketOpen { left, right } => todo!(),
+                Op::IfCond {
+                    condition,
+                    block,
+                    else_ifs,
+                    unconditional_else,
+                } => todo!(),
+            },
         }
     }
 }

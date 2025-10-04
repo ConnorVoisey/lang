@@ -29,7 +29,10 @@ pub enum StatementKind {
     },
     Expr(AstExpr),
     ExplicitReturn(AstExpr),
-    BlockReturn(AstExpr),
+    BlockReturn {
+        expr: AstExpr,
+        is_fn_return: bool,
+    },
 }
 #[derive(Debug)]
 pub struct AstStatement {
@@ -38,7 +41,11 @@ pub struct AstStatement {
 }
 
 impl Ast {
-    pub fn parse_block(&mut self, symbols: &mut SymbolTable) -> Option<AstBlock> {
+    pub fn parse_block(
+        &mut self,
+        symbols: &mut SymbolTable,
+        is_fn_return: bool,
+    ) -> Option<AstBlock> {
         debug_assert!(
             matches!(
                 self.curr_token(),
@@ -57,8 +64,9 @@ impl Ast {
                     break;
                 }
                 _ => {
-                    if let Some(statement) = self.parse_statement(symbols) {
-                        let need_break = matches!(&statement.kind, StatementKind::BlockReturn(_));
+                    if let Some(statement) = self.parse_statement(symbols, is_fn_return) {
+                        let need_break =
+                            matches!(&statement.kind, StatementKind::BlockReturn { .. });
                         statements.push(statement);
                         if need_break {
                             break;
@@ -76,7 +84,11 @@ impl Ast {
         })
     }
 
-    pub fn parse_statement(&mut self, symbols: &mut SymbolTable) -> Option<AstStatement> {
+    pub fn parse_statement(
+        &mut self,
+        symbols: &mut SymbolTable,
+        is_fn_return: bool,
+    ) -> Option<AstStatement> {
         let start_token_i = self.curr_token_i();
         match self.curr_token() {
             None => {
@@ -171,7 +183,10 @@ impl Ast {
                                 Some(Token {
                                     kind: TokenKind::CurlyBracketClose,
                                     ..
-                                }) => StatementKind::BlockReturn(expr),
+                                }) => StatementKind::BlockReturn {
+                                    expr,
+                                    is_fn_return: false,
+                                },
                                 _ => StatementKind::Expr(expr),
                             },
                         })
@@ -187,7 +202,7 @@ impl Ast {
                         Some(Token {
                             kind: TokenKind::CurlyBracketClose,
                             ..
-                        }) => StatementKind::BlockReturn(expr),
+                        }) => StatementKind::BlockReturn { expr, is_fn_return },
                         _ => StatementKind::Expr(expr),
                     },
                 })

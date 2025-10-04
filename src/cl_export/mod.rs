@@ -69,6 +69,7 @@ impl<'a> CLExporter<'a> {
     }
 
     pub fn cl_compile(&mut self) -> color_eyre::Result<()> {
+        color_eyre::install()?;
         let obj_prod = self.compile()?;
 
         fs::create_dir_all("./lang_tmp")?;
@@ -233,18 +234,26 @@ impl<'a> CLExporter<'a> {
         fn_builder: &mut FunctionBuilder,
         obj_module: &mut ObjectModule,
         call_conv: CallConv,
-    ) -> color_eyre::Result<()> {
-        match &statement.kind {
+    ) -> color_eyre::Result<Option<Value>> {
+        let val = match &statement.kind {
             StatementKind::Expr(expr) => {
                 self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                None
             }
             StatementKind::ExplicitReturn(expr) => {
-                let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                let cl_val = self
+                    .expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?
+                    .unwrap();
                 fn_builder.ins().return_(&[cl_val]);
+                None
             }
-            StatementKind::BlockReturn(expr) => {
+            StatementKind::BlockReturn { expr, is_fn_return } => {
                 let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
-                fn_builder.ins().return_(&[cl_val]);
+                if *is_fn_return {
+                    dbg!(cl_val, statement);
+                    fn_builder.ins().return_(&[cl_val.unwrap()]);
+                }
+                cl_val
             }
             StatementKind::Decleration {
                 symbol_id,
@@ -275,12 +284,14 @@ impl<'a> CLExporter<'a> {
                         };
                         symb.cranelift_id =
                             Some(CraneliftId::VarId(self.cl_vals.insert_var(cl_var)));
-                        let cl_val =
-                            self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                        let cl_val = self
+                            .expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?
+                            .unwrap();
                         fn_builder.def_var(cl_var, cl_val);
                     }
                     _ => todo!(),
                 };
+                None
             }
             StatementKind::Assignment {
                 ident_id: _,
@@ -300,16 +311,18 @@ impl<'a> CLExporter<'a> {
                             _ => unreachable!(),
                         };
                         symb.cranelift_id = Some(CraneliftId::VarId(cl_var_id));
-                        let cl_val =
-                            self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
+                        let cl_val = self
+                            .expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?
+                            .unwrap();
                         let cl_var = self.cl_vals.get_var(cl_var_id);
                         fn_builder.def_var(*cl_var, cl_val);
                     }
                     _ => todo!(),
                 };
+                None
             }
         };
-        Ok(())
+        Ok(val)
     }
     fn expr_to_cl(
         &mut self,
@@ -318,18 +331,18 @@ impl<'a> CLExporter<'a> {
         fn_builder: &mut FunctionBuilder,
         obj_module: &mut ObjectModule,
         call_conv: CallConv,
-    ) -> color_eyre::Result<Value> {
+    ) -> color_eyre::Result<Option<Value>> {
         let val = match &expr.kind {
             ExprKind::Atom(atom) => match atom {
                 Atom::Ident((_, symbol_id)) => {
                     let symb = self.symbols.resolve_mut(symbol_id.unwrap());
                     match symb.cranelift_id.unwrap() {
                         CraneliftId::VarId(cl_var_id) => {
-                            fn_builder.use_var(*self.cl_vals.get_var(cl_var_id))
+                            Some(fn_builder.use_var(*self.cl_vals.get_var(cl_var_id)))
                         }
                         CraneliftId::FnParamId(cl_fn_param_id) => {
                             let (block, param_index) = *self.cl_vals.get_fn_param(cl_fn_param_id);
-                            fn_builder.block_params(block)[param_index]
+                            fn_builder.block_params(block).get(param_index).map(|v| *v)
                         }
                         t => {
                             dbg!(t);
@@ -337,8 +350,8 @@ impl<'a> CLExporter<'a> {
                         }
                     }
                 }
-                Atom::Int(int_val) => fn_builder.ins().iconst(types::I32, *int_val as i64),
-                Atom::Bool(val) => fn_builder.ins().iconst(types::I8, *val as i64),
+                Atom::Int(int_val) => Some(fn_builder.ins().iconst(types::I32, *int_val as i64)),
+                Atom::Bool(val) => Some(fn_builder.ins().iconst(types::I8, *val as i64)),
                 Atom::CStr(str_val) => {
                     let c_str_val = match &self.ast.tokens[*str_val].kind {
                         TokenKind::CStr(val) => val,
@@ -358,7 +371,7 @@ impl<'a> CLExporter<'a> {
                     let str_val_global =
                         obj_module.declare_data_in_func(str_msg_id, fn_builder.func);
                     let str_ptr = fn_builder.ins().global_value(types::I64, str_val_global);
-                    str_ptr
+                    Some(str_ptr)
                 }
                 Atom::Str(token_id) => {
                     // TODO: this needs to be replaced with the length aware struct version,
@@ -376,7 +389,7 @@ impl<'a> CLExporter<'a> {
                     let str_val_global =
                         obj_module.declare_data_in_func(str_msg_id, fn_builder.func);
                     let str_ptr = fn_builder.ins().global_value(types::I64, str_val_global);
-                    str_ptr
+                    Some(str_ptr)
                 }
             },
             ExprKind::Op(op) => match &**op {
@@ -414,13 +427,16 @@ impl<'a> CLExporter<'a> {
                     let cl_fn_args = {
                         let mut cl_args = vec![];
                         for arg in args {
-                            cl_args.push(self.expr_to_cl(
-                                callee_func_id,
-                                arg,
-                                fn_builder,
-                                obj_module,
-                                call_conv,
-                            )?);
+                            cl_args.push(
+                                self.expr_to_cl(
+                                    callee_func_id,
+                                    arg,
+                                    fn_builder,
+                                    obj_module,
+                                    call_conv,
+                                )?
+                                .unwrap(),
+                            );
                         }
                         cl_args
                     };
@@ -428,75 +444,93 @@ impl<'a> CLExporter<'a> {
 
                     let res = fn_builder.inst_results(call_inst);
                     // TODO: probably need to replace all to return a slice
-                    res[0]
+                    Some(res[0])
                 }
                 Op::Add { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder.ins().iadd(left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(fn_builder.ins().iadd(left_val, right_val))
                 }
                 Op::Minus { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder.ins().isub(left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(fn_builder.ins().isub(left_val, right_val))
                 }
                 Op::Multiply { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder.ins().imul(left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(fn_builder.ins().imul(left_val, right_val))
                 }
                 Op::LessThan { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThan, left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(
+                        fn_builder
+                            .ins()
+                            .icmp(IntCC::SignedLessThan, left_val, right_val),
+                    )
                 }
                 Op::LessThanEq { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThanOrEqual, left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(
+                        fn_builder
+                            .ins()
+                            .icmp(IntCC::SignedLessThanOrEqual, left_val, right_val),
+                    )
                 }
                 Op::GreaterThan { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThan, left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(
+                        fn_builder
+                            .ins()
+                            .icmp(IntCC::SignedGreaterThan, left_val, right_val),
+                    )
                 }
                 Op::GreaterThanEq { left, right } => {
-                    let left_val =
-                        self.expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?;
-                    let right_val =
-                        self.expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?;
-                    fn_builder
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val)
+                    let left_val = self
+                        .expr_to_cl(callee_func_id, left, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(callee_func_id, right, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(fn_builder.ins().icmp(
+                        IntCC::SignedGreaterThanOrEqual,
+                        left_val,
+                        right_val,
+                    ))
                 }
                 Op::Ref(ref_expr) => {
                     // TOOD: this is definietly wrong but it might work for now
-                    let ref_cl_val = self.expr_to_cl(
-                        callee_func_id,
-                        ref_expr,
-                        fn_builder,
-                        obj_module,
-                        call_conv,
-                    )?;
-                    ref_cl_val
+                    let ref_cl_val = self
+                        .expr_to_cl(callee_func_id, ref_expr, fn_builder, obj_module, call_conv)?
+                        .unwrap();
+                    Some(ref_cl_val)
                 }
                 Op::IfCond {
                     condition,
@@ -510,13 +544,9 @@ impl<'a> CLExporter<'a> {
                     if else_ifs.len() > 1 {
                         todo!("implement else if branches in cranelift")
                     }
-                    let c = self.expr_to_cl(
-                        callee_func_id,
-                        condition,
-                        fn_builder,
-                        obj_module,
-                        call_conv,
-                    )?;
+                    let c = self
+                        .expr_to_cl(callee_func_id, condition, fn_builder, obj_module, call_conv)?
+                        .unwrap();
 
                     let then_block = fn_builder.create_block();
                     let else_block = fn_builder.create_block();
@@ -561,20 +591,11 @@ impl<'a> CLExporter<'a> {
 
                     // We've now seen all the predecessors of the merge block.
                     fn_builder.seal_block(merge_block);
-                    else_return
+                    Some(else_return)
                 }
 
                 Op::Block(block) => {
-                    match self.block_to_cl(
-                        callee_func_id,
-                        block,
-                        fn_builder,
-                        obj_module,
-                        call_conv,
-                    )? {
-                        Some(v) => v,
-                        None => todo!(),
-                    }
+                    self.block_to_cl(callee_func_id, block, fn_builder, obj_module, call_conv)?
                 }
 
                 t => {
@@ -597,11 +618,16 @@ impl<'a> CLExporter<'a> {
     ) -> color_eyre::Result<Option<Value>> {
         let cl_block = fn_builder.create_block();
         fn_builder.switch_to_block(cl_block);
-        for statement in block.statements.iter() {
-            self.statement_to_cl(callee_func_id, statement, fn_builder, obj_module, call_conv)?;
+        let mut ret_val = None;
+        for (i, statement) in block.statements.iter().enumerate() {
+            let val =
+                self.statement_to_cl(callee_func_id, statement, fn_builder, obj_module, call_conv)?;
+            if i == block.statements.len() - 1 {
+                ret_val = val;
+            }
         }
         fn_builder.seal_block(cl_block);
-        Ok(None)
+        Ok(ret_val)
     }
 }
 

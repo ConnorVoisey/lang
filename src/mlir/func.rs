@@ -1,3 +1,5 @@
+use rustc_hash::FxHashMap;
+
 use crate::{
     interner::SharedInterner,
     mlir::{
@@ -40,6 +42,7 @@ impl<'a> FunctionBuilder<'a> {
                     is_inline_hint: false,
                     is_exported: false,
                 },
+                symbols: FxHashMap::default(),
             },
             current_block: Some(BlockId(0)),
             type_arena,
@@ -126,5 +129,16 @@ impl<'a> FunctionBuilder<'a> {
             ty: todo!(),
             slot_index: todo!(),
         });
+    }
+
+    pub fn assign_symbol(&mut self, symbol_id: SymbolId, value_id: ValueId) {
+        self.func.symbols.insert(symbol_id, value_id);
+    }
+    pub fn get_symbol(&self, symbol_id: SymbolId) -> ValueId {
+        *self
+            .func
+            .symbols
+            .get(&symbol_id)
+            .expect("Called get_symbol on a symbol that has not been declared yet")
     }
 }

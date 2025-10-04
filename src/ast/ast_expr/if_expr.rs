@@ -43,7 +43,7 @@ impl Ast {
             }
         }
 
-        let block = match self.parse_block(symbols) {
+        let block = match self.parse_block(symbols, false) {
             Some(b) => b,
             None => {
                 // parse_block will have pushed errors already
@@ -69,7 +69,7 @@ impl Ast {
                             self.next_token(); // consume 'if'
                             match self.parse_expr(0, symbols) {
                                 Some(cond) => {
-                                    let blk = match self.parse_block(symbols) {
+                                    let blk = match self.parse_block(symbols, false) {
                                         Some(b) => b,
                                         None => {
                                             // parse_block pushed errors
@@ -89,7 +89,7 @@ impl Ast {
                             ..
                         }) => {
                             self.next_token(); // consume '{'
-                            unconditional_else = self.parse_block(symbols);
+                            unconditional_else = self.parse_block(symbols, false);
                         }
                         _ => {
                             // unexpected token after else — record and stop
