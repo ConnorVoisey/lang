@@ -18,22 +18,20 @@ struct Str {
 //     5 >= 7
 // }
 
+// fn fib(n Int) Int {
+//     5
+// }
+
 fn fib(n Int) Int {
-    {
-        5
+    if n < 2 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
     }
 }
 
-// fn fib(n Int) Int {
-//     if n < 2 {
-//         n
-//     } else {
-//         fib(n - 1) + fib(n - 2)
-//     }
-// }
-
 fn main() Int {
     printf(&c"%d
-", fib(10));
+", fib(40));
     0
 }

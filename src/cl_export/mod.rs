@@ -18,7 +18,10 @@ use cranelift::{
     },
     prelude::*,
 };
-use cranelift_codegen::{ir::FuncRef, verify_function};
+use cranelift_codegen::{
+    ir::{BlockArg, FuncRef},
+    verify_function,
+};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, ModuleResult};
 use cranelift_object::{ObjectBuilder, ObjectModule, ObjectProduct};
 use isa::CallConv;
@@ -250,7 +253,6 @@ impl<'a> CLExporter<'a> {
             StatementKind::BlockReturn { expr, is_fn_return } => {
                 let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
                 if *is_fn_return {
-                    dbg!(cl_val, statement);
                     fn_builder.ins().return_(&[cl_val.unwrap()]);
                 }
                 cl_val
@@ -342,7 +344,7 @@ impl<'a> CLExporter<'a> {
                         }
                         CraneliftId::FnParamId(cl_fn_param_id) => {
                             let (block, param_index) = *self.cl_vals.get_fn_param(cl_fn_param_id);
-                            fn_builder.block_params(block).get(param_index).map(|v| *v)
+                            fn_builder.block_params(block).get(param_index).copied()
                         }
                         t => {
                             dbg!(t);
@@ -538,64 +540,94 @@ impl<'a> CLExporter<'a> {
                     else_ifs,
                     unconditional_else,
                 } => {
-                    if expr.type_id.is_some() {
-                        todo!("implement if statements returning values in cranelift")
-                    }
                     if else_ifs.len() > 1 {
                         todo!("implement else if branches in cranelift")
                     }
-                    let c = self
+                    let cl_condition = self
                         .expr_to_cl(callee_func_id, condition, fn_builder, obj_module, call_conv)?
                         .unwrap();
 
                     let then_block = fn_builder.create_block();
                     let else_block = fn_builder.create_block();
                     let merge_block = fn_builder.create_block();
+                    if let Some(ty) = expr.type_id {
+                        let cl_type = self.types.kind(ty).to_cl_type();
+                        fn_builder.append_block_param(merge_block, cl_type);
+                    }
 
-                    fn_builder.ins().brif(c, then_block, [], else_block, []);
+                    fn_builder
+                        .ins()
+                        .brif(cl_condition, then_block, [], else_block, []);
 
                     fn_builder.switch_to_block(then_block);
                     fn_builder.seal_block(then_block);
                     // let then_return = fn_builder.ins().iconst(types::I32, 0);
-                    for statement in &block.statements {
-                        self.statement_to_cl(
+                    let mut merge_params = vec![];
+                    for (i, statement) in block.statements.iter().enumerate() {
+                        let val = self.statement_to_cl(
                             callee_func_id,
                             statement,
                             fn_builder,
                             obj_module,
                             call_conv,
                         )?;
+                        if i == &block.statements.len() - 1
+                            && let Some(v) = val
+                        {
+                            merge_params.push(BlockArg::Value(v));
+                        }
                     }
 
                     // Jump to the merge block, passing it the block return value.
-                    fn_builder.ins().jump(merge_block, []);
+                    fn_builder.ins().jump(merge_block, &merge_params);
 
                     fn_builder.switch_to_block(else_block);
                     fn_builder.seal_block(else_block);
                     let else_return = fn_builder.ins().iconst(types::I32, 0);
-                    for statement in &unconditional_else.as_ref().unwrap().statements {
-                        self.statement_to_cl(
+                    let statements = &unconditional_else.as_ref().unwrap().statements;
+                    let mut merge_params = vec![];
+                    for (i, statement) in statements.iter().enumerate() {
+                        let val = self.statement_to_cl(
                             callee_func_id,
                             statement,
                             fn_builder,
                             obj_module,
                             call_conv,
                         )?;
+                        if i == statements.len() - 1
+                            && let Some(v) = val
+                        {
+                            merge_params.push(BlockArg::Value(v));
+                        }
                     }
 
                     // Jump to the merge block, passing it the block return value.
-                    fn_builder.ins().jump(merge_block, &[]);
+                    fn_builder.ins().jump(merge_block, &merge_params);
 
                     // Switch to the merge block for subsequent statements.
                     fn_builder.switch_to_block(merge_block);
 
                     // We've now seen all the predecessors of the merge block.
                     fn_builder.seal_block(merge_block);
-                    Some(else_return)
+
+                    if expr.type_id.is_some() {
+                        Some(fn_builder.block_params(merge_block)[0])
+                    } else {
+                        None
+                    }
                 }
 
                 Op::Block(block) => {
-                    self.block_to_cl(callee_func_id, block, fn_builder, obj_module, call_conv)?
+                    let curr_block = fn_builder.current_block().unwrap();
+                    let val =
+                        self.block_to_cl(callee_func_id, block, fn_builder, obj_module, call_conv)?;
+                    let args = match val {
+                        Some(v) => vec![BlockArg::Value(v)],
+                        None => vec![],
+                    };
+                    fn_builder.ins().jump(curr_block, args.iter());
+                    fn_builder.switch_to_block(curr_block);
+                    val
                 }
 
                 t => {
@@ -618,15 +650,16 @@ impl<'a> CLExporter<'a> {
     ) -> color_eyre::Result<Option<Value>> {
         let cl_block = fn_builder.create_block();
         fn_builder.switch_to_block(cl_block);
+        fn_builder.seal_block(cl_block);
         let mut ret_val = None;
         for (i, statement) in block.statements.iter().enumerate() {
             let val =
                 self.statement_to_cl(callee_func_id, statement, fn_builder, obj_module, call_conv)?;
             if i == block.statements.len() - 1 {
                 ret_val = val;
+                fn_builder.append_block_params_for_function_returns(cl_block);
             }
         }
-        fn_builder.seal_block(cl_block);
         Ok(ret_val)
     }
 }

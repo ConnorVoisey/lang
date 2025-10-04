@@ -44,7 +44,6 @@ impl ModParser {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
         }
 
-        dbg!(&ast.fns[0]);
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),

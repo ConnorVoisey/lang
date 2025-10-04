@@ -143,11 +143,11 @@ impl<'a> TypeChecker<'a> {
             }
             StatementKind::BlockReturn { expr, is_fn_return } => {
                 let block_return_id = self.check_expr(expr, return_type_id).unwrap();
-                if *is_fn_return {
-                    if let Err(e) = self.arena.unify(block_return_id, return_type_id.unwrap()) {
-                        dbg!(e);
-                        panic!();
-                    }
+                if *is_fn_return
+                    && let Err(e) = self.arena.unify(block_return_id, return_type_id.unwrap())
+                {
+                    dbg!(e);
+                    panic!();
                 }
                 Some(block_return_id)
             }
@@ -165,7 +165,6 @@ impl<'a> TypeChecker<'a> {
             }
         }
         block.type_id = block_return_id;
-        dbg!(block_return_id);
         block_return_id
     }
     fn check_expr(&mut self, expr: &mut AstExpr, return_type_id: Option<TypeId>) -> Option<TypeId> {
@@ -296,6 +295,11 @@ impl<'a> TypeChecker<'a> {
                         else_ifs,
                         unconditional_else,
                     } => {
+                        let cond_type = self
+                            .check_expr(condition, return_type_id)
+                            .expect("if condition did not have a type");
+                        // TODO: ensure condition is of type Bool
+
                         // all blocks must return the same value
                         let if_block_return_id = self.check_block(block, return_type_id);
                         match if_block_return_id {
@@ -317,10 +321,9 @@ impl<'a> TypeChecker<'a> {
                                 for else_id in else_ifs.iter_mut() {
                                     if let Some(else_t) =
                                         self.check_block(&mut else_id.1, return_type_id)
+                                        && self.arena.unify(t, else_t).is_err()
                                     {
-                                        if self.arena.unify(t, else_t).is_err() {
-                                            panic!();
-                                        }
+                                        panic!();
                                     }
                                 }
                                 let else_return_id = match unconditional_else {
@@ -330,9 +333,19 @@ impl<'a> TypeChecker<'a> {
                                 // TODO: unify and check all block types are equal
                             }
                         }
+                        expr.type_id = if_block_return_id;
                         if_block_return_id
                     }
-                    Op::LessThan { left, right } => todo!(),
+                    Op::LessThan { left, right } => {
+                        let int_type = self.arena.alloc(TypeKind::Int);
+                        let left_type_id = self
+                            .check_expr(left, return_type_id)
+                            .expect("left hand side of < expression did not have a type");
+                        if self.arena.unify(left_type_id, int_type).is_err() {
+                            panic!();
+                        }
+                        Some(self.arena.alloc(TypeKind::Bool))
+                    }
                     Op::LessThanEq { left, right } => todo!(),
                     Op::GreaterThan { left, right } => todo!(),
                     Op::GreaterThanEq { left, right } => todo!(),
