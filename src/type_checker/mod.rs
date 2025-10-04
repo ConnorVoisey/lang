@@ -131,7 +131,7 @@ impl<'a> TypeChecker<'a> {
             }
             StatementKind::Expr(ast_expr) => {
                 ast_expr.type_id = self.check_expr(ast_expr, return_type_id);
-                None
+                ast_expr.type_id
             }
             StatementKind::ExplicitReturn(ast_expr) => {
                 let return_type_id = self.check_expr(ast_expr, return_type_id).unwrap();
@@ -162,6 +162,8 @@ impl<'a> TypeChecker<'a> {
                 block_return_id = Some(type_id);
             }
         }
+        block.type_id = block_return_id;
+        dbg!(block_return_id);
         block_return_id
     }
     fn check_expr(&mut self, expr: &mut AstExpr, return_type_id: Option<TypeId>) -> Option<TypeId> {
@@ -328,12 +330,19 @@ impl<'a> TypeChecker<'a> {
                         }
                         if_block_return_id
                     }
-                    // other ops...
-                    _ => {
-                        let fresh = self.arena.alloc_var();
-                        expr.type_id = Some(fresh);
-                        expr.type_id
+                    Op::LessThan { left, right } => todo!(),
+                    Op::LessThanEq { left, right } => todo!(),
+                    Op::GreaterThan { left, right } => todo!(),
+                    Op::GreaterThanEq { left, right } => todo!(),
+                    Op::Dot { left, right } => todo!(),
+                    Op::Block(ast_block) => {
+                        let type_id = self.check_block(ast_block, return_type_id);
+                        expr.type_id = type_id;
+                        type_id
                     }
+                    Op::Equivalent { left, right } => todo!(),
+                    Op::SquareOpen { left, args } => todo!(),
+                    Op::BracketOpen { left, right } => todo!(),
                 }
             }
         }

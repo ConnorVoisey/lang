@@ -500,7 +500,23 @@ impl Ast {
                             type_id: None,
                         }),
                     },
+                    TokenKind::LessThanEq => Op::LessThanEq {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
                     TokenKind::GreaterThan => Op::GreaterThan {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
+                    TokenKind::GreaterThanEq => Op::GreaterThanEq {
                         left: lhs?,
                         right: rhs.unwrap_or(AstExpr {
                             span: Span { start: 0, end: 0 },

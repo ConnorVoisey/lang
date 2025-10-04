@@ -10,6 +10,7 @@ pub mod cl_export;
 pub mod error;
 pub mod interner;
 pub mod lexer;
+pub mod mlir;
 pub mod symbols;
 pub mod type_checker;
 pub mod types;
@@ -43,7 +44,7 @@ impl ModParser {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
         }
 
-        // dbg!(&ast.fns);
+        dbg!(&ast.fns[0]);
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),

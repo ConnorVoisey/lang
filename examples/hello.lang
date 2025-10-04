@@ -4,7 +4,8 @@ import {
 
 extern "C" {
 //    fn puts(str &CStr) Int;
-    fn printf(str &CStr, val Bool) Int;
+//    fn printf(str &CStr, val Bool) Int;
+    fn printf(str &CStr, val Int) Int;
 }
 
 struct Str {
@@ -13,8 +14,14 @@ struct Str {
 }
 
 
-fn fib(n Int) Bool {
-    5 < 3
+// fn fib(n Int) Bool {
+//     5 >= 7
+// }
+
+fn fib(n Int) Int {
+    {
+        5
+    }
 }
 
 // fn fib(n Int) Int {

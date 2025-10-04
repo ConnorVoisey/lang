@@ -588,14 +588,20 @@ impl<'a> CLExporter<'a> {
     }
 
     fn block_to_cl(
-        &self,
+        &mut self,
         callee_func_id: FuncId,
         block: &AstBlock,
         fn_builder: &mut FunctionBuilder,
         obj_module: &mut ObjectModule,
         call_conv: CallConv,
     ) -> color_eyre::Result<Option<Value>> {
-        todo!()
+        let cl_block = fn_builder.create_block();
+        fn_builder.switch_to_block(cl_block);
+        for statement in block.statements.iter() {
+            self.statement_to_cl(callee_func_id, statement, fn_builder, obj_module, call_conv)?;
+        }
+        fn_builder.seal_block(cl_block);
+        Ok(None)
     }
 }
 
