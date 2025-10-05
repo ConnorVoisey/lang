@@ -183,10 +183,7 @@ impl Ast {
                                 Some(Token {
                                     kind: TokenKind::CurlyBracketClose,
                                     ..
-                                }) => StatementKind::BlockReturn {
-                                    expr,
-                                    is_fn_return: false,
-                                },
+                                }) => StatementKind::BlockReturn { expr, is_fn_return },
                                 _ => StatementKind::Expr(expr),
                             },
                         })
