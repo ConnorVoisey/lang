@@ -195,7 +195,6 @@ impl<'a> CLExporter<'a> {
 
         let block = fn_builder.create_block();
         fn_builder.switch_to_block(block);
-        fn_builder.seal_block(block);
         fn_builder.append_block_params_for_function_params(block);
         for (i, arg) in ast_fn.args.iter().enumerate() {
             let symb = self.symbols.resolve_mut(arg.symbol_id);
@@ -251,6 +250,13 @@ impl<'a> CLExporter<'a> {
                 None
             }
             StatementKind::BlockReturn { expr, is_fn_return } => {
+                let block = fn_builder.create_block();
+                if *is_fn_return {
+                    // fn_builder.append_block_params_for_function_returns(block);
+                }
+                fn_builder.ins().jump(block, &[]);
+                fn_builder.seal_block(block);
+                fn_builder.switch_to_block(block);
                 let cl_val = self.expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?;
                 if *is_fn_return {
                     fn_builder.ins().return_(&[cl_val.unwrap()]);
@@ -321,6 +327,35 @@ impl<'a> CLExporter<'a> {
                     }
                     _ => todo!(),
                 };
+                None
+            }
+            StatementKind::WhileLoop { condition, block } => {
+                let curr_block = fn_builder.current_block().unwrap();
+                fn_builder.seal_block(curr_block);
+
+                let condition_block = fn_builder.create_block();
+
+                fn_builder.ins().jump(condition_block, &[]);
+                fn_builder.switch_to_block(condition_block);
+
+                fn_builder.switch_to_block(condition_block);
+                let condition_cl_val = self
+                    .expr_to_cl(fid, condition, fn_builder, obj_module, call_conv)?
+                    .unwrap();
+                let do_block = fn_builder.create_block();
+                let merge_block = fn_builder.create_block();
+                fn_builder
+                    .ins()
+                    .brif(condition_cl_val, do_block, &[], merge_block, &[]);
+                fn_builder.seal_block(do_block);
+
+                fn_builder.switch_to_block(do_block);
+                self.block_to_cl(fid, block, fn_builder, obj_module, call_conv, false)?;
+                fn_builder.ins().jump(condition_block, &[]);
+                fn_builder.seal_block(condition_block);
+
+                fn_builder.switch_to_block(merge_block);
+                fn_builder.seal_block(merge_block);
                 None
             }
         };
@@ -619,8 +654,14 @@ impl<'a> CLExporter<'a> {
 
                 Op::Block(block) => {
                     let curr_block = fn_builder.current_block().unwrap();
-                    let val =
-                        self.block_to_cl(callee_func_id, block, fn_builder, obj_module, call_conv)?;
+                    let val = self.block_to_cl(
+                        callee_func_id,
+                        block,
+                        fn_builder,
+                        obj_module,
+                        call_conv,
+                        false,
+                    )?;
                     let args = match val {
                         Some(v) => vec![BlockArg::Value(v)],
                         None => vec![],
@@ -647,15 +688,14 @@ impl<'a> CLExporter<'a> {
         fn_builder: &mut FunctionBuilder,
         obj_module: &mut ObjectModule,
         call_conv: CallConv,
+        is_fn_return: bool,
     ) -> color_eyre::Result<Option<Value>> {
-        let cl_block = fn_builder.create_block();
-        fn_builder.switch_to_block(cl_block);
-        fn_builder.seal_block(cl_block);
+        let cl_block = fn_builder.current_block().unwrap();
         let mut ret_val = None;
-        for (i, statement) in block.statements.iter().enumerate() {
+        for statement in block.statements.iter() {
             let val =
                 self.statement_to_cl(callee_func_id, statement, fn_builder, obj_module, call_conv)?;
-            if i == block.statements.len() - 1 {
+            if is_fn_return {
                 ret_val = val;
                 fn_builder.append_block_params_for_function_returns(cl_block);
             }

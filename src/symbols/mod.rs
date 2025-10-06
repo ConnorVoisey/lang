@@ -252,6 +252,10 @@ impl SymbolTable {
             StatementKind::BlockReturn { expr, .. } => {
                 self.register_expr(expr);
             }
+            StatementKind::WhileLoop { condition, block } => {
+                self.register_expr(condition);
+                self.register_block(block);
+            }
         };
     }
     pub fn register_expr(&mut self, expr: &mut AstExpr) {

@@ -200,6 +200,7 @@ impl<'a> Module<'a> {
             }
             StatementKind::ExplicitReturn(ast_expr) => todo!(),
             StatementKind::BlockReturn { expr, is_fn_return } => todo!(),
+            StatementKind::WhileLoop { condition, block } => todo!(),
         }
     }
 

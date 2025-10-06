@@ -151,6 +151,16 @@ impl<'a> TypeChecker<'a> {
                 }
                 Some(block_return_id)
             }
+            StatementKind::WhileLoop { condition, block } => {
+                let bool_type = self.arena.alloc(TypeKind::Bool);
+                let condition_return = self.check_expr(condition, return_type_id).unwrap();
+                if let Err(e) = self.arena.unify(bool_type, condition_return) {
+                    dbg!(e);
+                    panic!();
+                }
+                self.check_block(block, return_type_id);
+                None
+            }
         }
     }
     fn check_block(

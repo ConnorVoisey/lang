@@ -35,6 +35,7 @@ impl ModParser {
         if !ast.errs.is_empty() {
             return Err(CompliationError::AstParseError(ast.errs));
         }
+        dbg!(&ast.fns[0]);
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 
@@ -44,6 +45,7 @@ impl ModParser {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
         }
 
+        dbg!(&ast.fns[0]);
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),

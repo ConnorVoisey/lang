@@ -33,6 +33,10 @@ pub enum StatementKind {
         expr: AstExpr,
         is_fn_return: bool,
     },
+    WhileLoop {
+        condition: AstExpr,
+        block: AstBlock,
+    },
 }
 #[derive(Debug)]
 pub struct AstStatement {
@@ -189,6 +193,19 @@ impl Ast {
                         })
                     }
                 }
+            }
+            Some(Token {
+                kind: TokenKind::WhileKeyWord,
+                ..
+            }) => {
+                let start_token_at = self.curr_token_i();
+                self.next_token();
+                let condition = self.parse_expr(0, symbols)?;
+                let block = self.parse_block(symbols, false)?;
+                Some(AstStatement {
+                    start_token_at,
+                    kind: StatementKind::WhileLoop { condition, block },
+                })
             }
             _ => {
                 let start_token_at = self.curr_token_i();
