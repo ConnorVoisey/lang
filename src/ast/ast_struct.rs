@@ -80,7 +80,8 @@ impl Ast {
             match &token.kind {
                 TokenKind::Ident(_) => {
                     let ident_token_at = self.curr_token_i();
-                    fields.push((ident_token_at, self.parse_var_type()));
+                    let (var_type, _type_span) = self.parse_var_type();
+                    fields.push((ident_token_at, var_type));
                     match self.next_token() {
                         Some(Token {
                             kind: TokenKind::Comma,
@@ -106,18 +107,21 @@ impl Ast {
                 }
             }
         }
+        let full_def_span = Span {
+            start: self.tokens[start_token_i].span.start,
+            end: self.tokens[self.curr_token_i()].span.end,
+        };
+        let ident_span = self.tokens[ident_token_at].span.clone();
         let struct_val = AstStruct {
             ident_id,
             ident_token_at,
             symbol_id: symbols.declare(
                 ident_id,
-                SymbolKind::Struct {
+                SymbolKind::Struct(crate::symbols::StructSymbolData {
                     struct_id: self.structs.len(),
-                },
-                Span {
-                    start: self.tokens[start_token_i].span.start,
-                    end: self.tokens[self.curr_token_i()].span.end,
-                },
+                    full_def_span,
+                }),
+                ident_span,
             ),
             type_id: None,
             fields,

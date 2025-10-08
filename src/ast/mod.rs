@@ -146,19 +146,31 @@ impl Ast {
         }
     }
 
-    fn parse_var_type(&mut self) -> VarType {
+    fn parse_var_type(&mut self) -> (VarType, crate::lexer::Span) {
+        let start_i = self.curr_token_i();
         match self.next_token() {
             Some(Token {
                 kind: TokenKind::Amp,
-                ..
-            }) => VarType::Ref(Box::new(self.parse_var_type())),
+                span,
+            }) => {
+                let span_cloned = span.clone();
+                let (inner_type, inner_span) = self.parse_var_type();
+                (
+                    VarType::Ref(Box::new(inner_type)),
+                    crate::lexer::Span {
+                        start: span_cloned.start,
+                        end: inner_span.end,
+                    },
+                )
+            }
             Some(Token {
                 kind: TokenKind::Ident(ident_id),
-                ..
+                span,
             }) => {
                 let ident_cloned = ident_id.clone();
                 let ident_cloned_2 = ident_cloned.clone();
-                match self.interner.read().resolve(ident_cloned) {
+                let span_cloned = span.clone();
+                let var_type = match self.interner.read().resolve(ident_cloned) {
                     "Int" => VarType::Int,
                     "Uint" => VarType::Uint,
                     "Str" => VarType::Str,
@@ -166,7 +178,8 @@ impl Ast {
                     "CChar" => VarType::CChar,
                     "Bool" => VarType::Bool,
                     _ => VarType::Custom((ident_cloned_2, None)),
-                }
+                };
+                (var_type, span_cloned)
             }
             Some(t) => {
                 dbg!(t);

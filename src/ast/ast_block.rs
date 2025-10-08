@@ -1,7 +1,7 @@
 use crate::{
     ast::{Ast, ast_expr::AstExpr, error::AstParseError},
     interner::IdentId,
-    lexer::{Span, Token, TokenKind},
+    lexer::{Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
     types::TypeId,
 };
@@ -103,11 +103,11 @@ impl Ast {
                 kind: TokenKind::LetKeyWord,
                 ..
             }) => {
-                let ident_id = *match self.next_token() {
+                let (ident_id, ident_span) = match self.next_token() {
                     Some(Token {
                         kind: TokenKind::Ident(ident_id),
-                        ..
-                    }) => ident_id,
+                        span,
+                    }) => (*ident_id, span.clone()),
                     t => {
                         dbg!(t);
                         todo!();
@@ -115,15 +115,12 @@ impl Ast {
                 };
                 let symbol_id = symbols.declare(
                     ident_id,
-                    SymbolKind::Var {
+                    SymbolKind::Var(crate::symbols::VarSymbolData {
                         type_id: None,
                         is_used: false,
                         is_mutable: false,
-                    },
-                    Span {
-                        start: self.tokens[start_token_i].span.start,
-                        end: self.tokens[self.curr_token_i()].span.end,
-                    },
+                    }),
+                    ident_span,
                 );
                 assert!(
                     matches!(

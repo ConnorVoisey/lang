@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     ast::{
         Ast,
-        ast_block::{AstStatement, StatementKind},
+        ast_block::StatementKind,
         ast_expr::{AstExpr, Atom, ExprKind, Op},
     },
     interner::{IdentId, SharedInterner},
@@ -198,9 +198,15 @@ impl<'a> Module<'a> {
             StatementKind::Expr(ast_expr) => {
                 self.parse_expr(fb, ast_expr);
             }
-            StatementKind::ExplicitReturn(ast_expr) => todo!(),
-            StatementKind::BlockReturn { expr, is_fn_return } => todo!(),
-            StatementKind::WhileLoop { condition, block } => todo!(),
+            StatementKind::ExplicitReturn(_) => todo!(),
+            StatementKind::BlockReturn {
+                expr: _,
+                is_fn_return: _,
+            } => todo!(),
+            StatementKind::WhileLoop {
+                condition: _,
+                block: _,
+            } => todo!(),
         }
     }
 
@@ -214,27 +220,27 @@ impl<'a> Module<'a> {
                 Atom::CStr(_) => todo!(),
             },
             ExprKind::Op(op) => match &**op {
-                Op::Add { left, right } => todo!(),
-                Op::Divide { left, right } => todo!(),
-                Op::Minus { left, right } => todo!(),
-                Op::LessThan { left, right } => todo!(),
-                Op::LessThanEq { left, right } => todo!(),
-                Op::GreaterThan { left, right } => todo!(),
-                Op::GreaterThanEq { left, right } => todo!(),
-                Op::Neg(ast_expr) => todo!(),
-                Op::Ref(ast_expr) => todo!(),
-                Op::Multiply { left, right } => todo!(),
-                Op::FnCall { ident, args } => todo!(),
-                Op::Dot { left, right } => todo!(),
-                Op::Block(ast_block) => todo!(),
-                Op::Equivalent { left, right } => todo!(),
-                Op::SquareOpen { left, args } => todo!(),
-                Op::BracketOpen { left, right } => todo!(),
+                Op::Add { left: _, right: _ } => todo!(),
+                Op::Divide { left: _, right: _ } => todo!(),
+                Op::Minus { left: _, right: _ } => todo!(),
+                Op::LessThan { left: _, right: _ } => todo!(),
+                Op::LessThanEq { left: _, right: _ } => todo!(),
+                Op::GreaterThan { left: _, right: _ } => todo!(),
+                Op::GreaterThanEq { left: _, right: _ } => todo!(),
+                Op::Neg(_) => todo!(),
+                Op::Ref(_) => todo!(),
+                Op::Multiply { left: _, right: _ } => todo!(),
+                Op::FnCall { ident: _, args: _ } => todo!(),
+                Op::Dot { left: _, right: _ } => todo!(),
+                Op::Block(_) => todo!(),
+                Op::Equivalent { left: _, right: _ } => todo!(),
+                Op::SquareOpen { left: _, args: _ } => todo!(),
+                Op::BracketOpen { left: _, right: _ } => todo!(),
                 Op::IfCond {
-                    condition,
-                    block,
-                    else_ifs,
-                    unconditional_else,
+                    condition: _,
+                    block: _,
+                    else_ifs: _,
+                    unconditional_else: _,
                 } => todo!(),
             },
         }

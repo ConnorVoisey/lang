@@ -120,8 +120,8 @@ impl<'a> CLExporter<'a> {
     ) -> ModuleResult<FuncId> {
         let mut sig = module.make_signature();
         let fn_symb = self.symbols.resolve(func.symbol_id);
-        let fn_type_id = if let SymbolKind::Fn { fn_type_id, .. } = fn_symb.kind {
-            fn_type_id
+        let fn_type_id = if let SymbolKind::Fn(data) = &fn_symb.kind {
+            data.fn_type_id
         } else {
             unreachable!();
         };
@@ -157,8 +157,8 @@ impl<'a> CLExporter<'a> {
 
         let mut sig = Signature::new(call_conv);
         let symbol = self.symbols.resolve_mut(ast_fn.symbol_id);
-        let fn_type_id = if let SymbolKind::Fn { fn_type_id, .. } = symbol.kind {
-            fn_type_id
+        let fn_type_id = if let SymbolKind::Fn(data) = &symbol.kind {
+            data.fn_type_id
         } else {
             unreachable!();
         };
@@ -270,12 +270,9 @@ impl<'a> CLExporter<'a> {
                 expr,
             } => {
                 let symb = self.symbols.resolve_mut(*symbol_id);
-                match symb.kind {
-                    SymbolKind::Var {
-                        type_id,
-                        is_used: _,
-                        is_mutable: _,
-                    } => {
+                match &symb.kind {
+                    SymbolKind::Var(data) => {
+                        let type_id = data.type_id;
                         let ty = self.types.kind(type_id.unwrap());
                         let cl_var = match ty {
                             TypeKind::Int => fn_builder.declare_var(types::I32),
@@ -308,12 +305,8 @@ impl<'a> CLExporter<'a> {
                 symbol_id,
             } => {
                 let symb = self.symbols.resolve_mut(symbol_id.unwrap());
-                match symb.kind {
-                    SymbolKind::Var {
-                        type_id: _,
-                        is_used: _,
-                        is_mutable: _,
-                    } => {
+                match &symb.kind {
+                    SymbolKind::Var(_) => {
                         let cl_var_id = match symb.cranelift_id.unwrap() {
                             CraneliftId::VarId(cl_var_id) => cl_var_id,
                             _ => unreachable!(),

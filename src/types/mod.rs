@@ -33,6 +33,14 @@ pub struct TypeArena {
     parent: Vec<TypeId>, // union–find parent links
     rank: Vec<u32>,      // union–find ranks for balancing
     struct_symbol_to_type: FxHashMap<usize, TypeId>,
+
+    // Cached primitive types
+    pub int_type: TypeId,
+    pub uint_type: TypeId,
+    pub bool_type: TypeId,
+    pub str_type: TypeId,
+    pub cstr_type: TypeId,
+    pub void_type: TypeId,
 }
 
 #[derive(Debug)]
@@ -42,12 +50,29 @@ pub enum UnifyErrorWithoutSpan {
 
 impl TypeArena {
     pub fn new() -> Self {
-        Self {
+        let mut arena = Self {
             kinds: vec![],
             parent: Vec::new(),
             rank: Vec::new(),
             struct_symbol_to_type: FxHashMap::default(),
-        }
+            // Initialize with dummy values, will be set below
+            int_type: TypeId(0),
+            uint_type: TypeId(0),
+            bool_type: TypeId(0),
+            str_type: TypeId(0),
+            cstr_type: TypeId(0),
+            void_type: TypeId(0),
+        };
+
+        // Allocate primitive types once
+        arena.int_type = arena.make(TypeKind::Int);
+        arena.uint_type = arena.make(TypeKind::Uint);
+        arena.bool_type = arena.make(TypeKind::Bool);
+        arena.str_type = arena.make(TypeKind::Str);
+        arena.cstr_type = arena.make(TypeKind::CStr);
+        arena.void_type = arena.make(TypeKind::Void);
+
+        arena
     }
 
     fn make(&mut self, kind: TypeKind) -> TypeId {

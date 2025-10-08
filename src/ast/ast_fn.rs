@@ -19,6 +19,7 @@ pub struct AstFunc {
     pub symbol_id: SymbolId,
     pub args: Vec<AstFnArg>,
     pub return_type: VarType,
+    pub return_type_span: Span,
     pub body: Option<AstBlock>,
 }
 
@@ -83,24 +84,30 @@ impl Ast {
 
         // TODO: parse fn body, call fn self.parse_block or self.parse_fn_body
         let args = self.parse_fn_args(symbols);
-        let return_type = self.parse_var_type();
+        let (return_type, return_type_span) = self.parse_var_type();
+
+        let fn_name_span = self.tokens[start_token_i + 1].span.clone();
+        let full_signature_span = Span {
+            start: self.tokens[start_token_i].span.start,
+            end: self.tokens[self.curr_token_i()].span.end,
+        };
 
         Some(AstFunc {
             fn_token_at,
             ident_id,
             symbol_id: symbols.declare(
                 ident_id,
-                SymbolKind::Fn {
+                SymbolKind::Fn(crate::symbols::FnSymbolData {
                     fn_type_id: None,
                     return_type_id: None,
-                },
-                Span {
-                    start: self.tokens[start_token_i].span.start,
-                    end: self.tokens[self.curr_token_i()].span.end,
-                },
+                    return_type_span: return_type_span.clone(),
+                    full_signature_span,
+                }),
+                fn_name_span,
             ),
             args,
             return_type,
+            return_type_span,
             body: None,
         })
     }
@@ -122,24 +129,22 @@ impl Ast {
             match self.next_token() {
                 Some(Token {
                     kind: TokenKind::Ident(id),
-                    ..
+                    span: ident_span,
                 }) => {
                     let ident_id = *id;
-                    let start_token_i = self.curr_token_i();
-                    let var_type = self.parse_var_type();
+                    let ident_span = ident_span.clone();
+                    let (var_type, type_span) = self.parse_var_type();
                     args.push(AstFnArg {
                         ident_id,
                         symbol_id: symbols.declare(
                             ident_id,
-                            SymbolKind::FnArg {
+                            SymbolKind::FnArg(crate::symbols::FnArgSymbolData {
                                 type_id: None,
                                 is_used: false,
                                 is_mutable: false,
-                            },
-                            Span {
-                                start: self.tokens[start_token_i].span.start,
-                                end: self.tokens[self.curr_token_i()].span.end,
-                            },
+                                type_span,
+                            }),
+                            ident_span.clone(),
                         ),
                         var_type,
                     });

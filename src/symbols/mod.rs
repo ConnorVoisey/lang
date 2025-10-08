@@ -19,32 +19,49 @@ pub mod error;
 pub struct SymbolId(usize);
 
 #[derive(Debug)]
-pub enum SymbolKind {
-    Fn {
-        fn_type_id: Option<TypeId>,
-        return_type_id: Option<TypeId>,
-    },
-    FnArg {
-        type_id: Option<TypeId>,
-        is_used: bool,
-        is_mutable: bool,
-    },
-    Var {
-        type_id: Option<TypeId>,
-        is_used: bool,
-        is_mutable: bool,
-    },
-    Struct {
-        struct_id: usize,
-    },
+pub struct FnSymbolData {
+    pub fn_type_id: Option<TypeId>,
+    pub return_type_id: Option<TypeId>,
+    pub return_type_span: Span,
+    pub full_signature_span: Span,
 }
+
+#[derive(Debug)]
+pub struct FnArgSymbolData {
+    pub type_id: Option<TypeId>,
+    pub is_used: bool,
+    pub is_mutable: bool,
+    pub type_span: Span,
+}
+
+#[derive(Debug)]
+pub struct VarSymbolData {
+    pub type_id: Option<TypeId>,
+    pub is_used: bool,
+    pub is_mutable: bool,
+}
+
+#[derive(Debug)]
+pub struct StructSymbolData {
+    pub struct_id: usize,
+    pub full_def_span: Span,
+}
+
+#[derive(Debug)]
+pub enum SymbolKind {
+    Fn(FnSymbolData),
+    FnArg(FnArgSymbolData),
+    Var(VarSymbolData),
+    Struct(StructSymbolData),
+}
+
 #[derive(Debug)]
 pub struct Symbol {
     pub ident_id: IdentId,
     pub scope_depth: usize,
     pub kind: SymbolKind,
     pub cranelift_id: Option<CraneliftId>,
-    pub span: Span,
+    pub ident_span: Span,
 }
 
 #[derive(Debug)]
@@ -87,7 +104,7 @@ impl SymbolTable {
             kind: symbol_kind,
             scope_depth,
             cranelift_id: None,
-            span,
+            ident_span: span,
         });
         let last_scope = self
             .scopes
@@ -127,7 +144,7 @@ impl SymbolTable {
         // First, ensure the symbol exists and is a function (immutable borrow).
         let sym_id = func.symbol_id;
         match &self.resolve(sym_id).kind {
-            SymbolKind::Fn { .. } => (),
+            SymbolKind::Fn(_) => (),
             t => unreachable!("fn_symbol should always have SymbolKind::Fn, got: {t:?}"),
         }
 
@@ -149,10 +166,10 @@ impl SymbolTable {
                     Some(symbol_id) => {
                         let symbol = self.resolve(*symbol_id);
                         match &symbol.kind {
-                            SymbolKind::Fn { .. } => todo!(),
-                            SymbolKind::FnArg { .. } => todo!(),
-                            SymbolKind::Var { .. } => todo!(),
-                            SymbolKind::Struct { .. } => todo!(),
+                            SymbolKind::Fn(_) => todo!(),
+                            SymbolKind::FnArg(_) => todo!(),
+                            SymbolKind::Var(_) => todo!(),
+                            SymbolKind::Struct(_) => todo!(),
                         }
                     }
                     None => match self.interner.read().resolve(*ident_id) {
@@ -180,12 +197,8 @@ impl SymbolTable {
             let kind = arg.var_type.to_type_kind(types);
             let new_type_id = types.alloc(kind);
             match &mut symb.kind {
-                SymbolKind::FnArg {
-                    type_id,
-                    is_used: _,
-                    is_mutable: _,
-                } => {
-                    *type_id = Some(new_type_id);
+                SymbolKind::FnArg(data) => {
+                    data.type_id = Some(new_type_id);
                 }
                 _ => unreachable!("fn arg symbol should have tag for fn arg"),
             }
@@ -202,12 +215,9 @@ impl SymbolTable {
         {
             let fn_symbol = self.resolve_mut(sym_id);
             match &mut fn_symbol.kind {
-                SymbolKind::Fn {
-                    fn_type_id,
-                    return_type_id,
-                } => {
-                    *return_type_id = Some(return_t);
-                    *fn_type_id = Some(fn_t);
+                SymbolKind::Fn(data) => {
+                    data.return_type_id = Some(return_t);
+                    data.fn_type_id = Some(fn_t);
                 }
                 t => unreachable!("fn_symbol should always have SymbolKind::Fn, got: {t:?}"),
             }
