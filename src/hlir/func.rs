@@ -1,11 +1,11 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
-    interner::SharedInterner,
-    mlir::{
+    hlir::{
         BinaryOp, Block, BlockId, FuncMetadata, Function, Instr, InstrId, LocalSlot, SpanId,
         UnaryOp, ValueId, ValueInfo,
     },
+    interner::SharedInterner,
     symbols::SymbolId,
     types::{TypeArena, TypeId},
 };

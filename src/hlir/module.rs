@@ -1,6 +1,6 @@
 use crate::{
+    hlir::{FuncId, Function, Module},
     interner::SharedInterner,
-    mlir::{FuncId, Function, Module},
     types::TypeArena,
 };
 use std::sync::{

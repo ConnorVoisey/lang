@@ -6,8 +6,8 @@ use crate::{
         ast_block::StatementKind,
         ast_expr::{AstExpr, Atom, ExprKind, Op},
     },
+    hlir::func::FunctionBuilder,
     interner::{IdentId, SharedInterner},
-    mlir::func::FunctionBuilder,
     symbols::SymbolId,
     types::{TypeArena, TypeId},
 };
