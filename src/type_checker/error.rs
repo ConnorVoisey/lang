@@ -86,6 +86,9 @@ pub enum TypeCheckingError {
         right_type_str: String,
         right_span: Span,
     },
+
+    #[error("Break statement outside of loop")]
+    BreakOutsideLoop { break_span: Span },
 }
 
 impl ToDiagnostic for TypeCheckingError {
@@ -228,6 +231,16 @@ impl ToDiagnostic for TypeCheckingError {
                 ])
                 .with_notes(vec![String::from(
                     "Comparison operators (<, >, <=, >=) require integer operands.",
+                )]),
+
+            TypeCheckingError::BreakOutsideLoop { break_span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, break_span.start..break_span.end)
+                        .with_message("cannot break here"),
+                ])
+                .with_notes(vec![String::from(
+                    "Break statements can only be used inside while loops.",
                 )]),
         }
     }

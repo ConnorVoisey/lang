@@ -1,7 +1,7 @@
 use crate::{
     ast::{Ast, ast_expr::AstExpr, error::AstParseError},
     interner::IdentId,
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolKind, SymbolTable},
     types::TypeId,
 };
@@ -36,6 +36,9 @@ pub enum StatementKind {
     WhileLoop {
         condition: AstExpr,
         block: AstBlock,
+    },
+    Break {
+        span: Span,
     },
 }
 #[derive(Debug)]
@@ -151,6 +154,18 @@ impl Ast {
                 Some(AstStatement {
                     start_token_at: start_token_i,
                     kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols)?),
+                })
+            }
+            Some(Token {
+                kind: TokenKind::BreakKeyWord,
+                ..
+            }) => {
+                self.next_token();
+                Some(AstStatement {
+                    start_token_at: start_token_i,
+                    kind: StatementKind::Break {
+                        span: self.curr_token().unwrap().span.clone(),
+                    },
                 })
             }
             Some(Token {

@@ -49,6 +49,7 @@ pub enum TokenKind {
     TrueKeyWord,
     FalseKeyWord,
     WhileKeyWord,
+    BreakKeyWord,
 }
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -275,6 +276,7 @@ impl<'src> Lexer<'src> {
             "true" => TokenKind::TrueKeyWord,
             "false" => TokenKind::FalseKeyWord,
             "while" => TokenKind::WhileKeyWord,
+            "break" => TokenKind::BreakKeyWord,
             _ => {
                 let mut interner_writable = interner.write();
                 let id = interner_writable.lookup_ident(val);

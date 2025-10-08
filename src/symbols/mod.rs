@@ -249,6 +249,7 @@ impl SymbolTable {
                 self.register_expr(condition);
                 self.register_block(block);
             }
+            StatementKind::Break { .. } => (),
         };
     }
     pub fn register_expr(&mut self, expr: &mut AstExpr) {

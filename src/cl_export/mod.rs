@@ -42,6 +42,7 @@ pub struct CLExporter<'a> {
     symbols: &'a mut SymbolTable,
     cl_vals: ClVals,
     func_defs_in_funcs: FxHashMap<FnInFn, FuncRef>,
+    break_targets: Vec<Block>, // Stack of break targets for nested loops
 }
 
 #[derive(Eq, Hash, PartialEq)]
@@ -68,6 +69,7 @@ impl<'a> CLExporter<'a> {
             symbols,
             func_defs_in_funcs: FxHashMap::default(),
             cl_vals: ClVals::default(),
+            break_targets: Vec::new(),
         }
     }
 
@@ -342,13 +344,33 @@ impl<'a> CLExporter<'a> {
                     .brif(condition_cl_val, do_block, &[], merge_block, &[]);
                 fn_builder.seal_block(do_block);
 
+                // Push merge_block as break target
+                self.break_targets.push(merge_block);
+
                 fn_builder.switch_to_block(do_block);
                 self.block_to_cl(fid, block, fn_builder, obj_module, call_conv, false)?;
                 fn_builder.ins().jump(condition_block, &[]);
                 fn_builder.seal_block(condition_block);
 
+                // Pop break target
+                self.break_targets.pop();
+
                 fn_builder.switch_to_block(merge_block);
                 fn_builder.seal_block(merge_block);
+                None
+            }
+            StatementKind::Break { .. } => {
+                // Jump to the current break target (top of the stack)
+                let break_target = *self.break_targets.last().expect(
+                    "Break statement outside loop - should have been caught by type checker",
+                );
+                fn_builder.ins().jump(break_target, &[]);
+
+                // Create unreachable block for any code after break
+                let unreachable_block = fn_builder.create_block();
+                fn_builder.seal_block(unreachable_block);
+                fn_builder.switch_to_block(unreachable_block);
+
                 None
             }
         };
@@ -611,26 +633,29 @@ impl<'a> CLExporter<'a> {
 
                     fn_builder.switch_to_block(else_block);
                     fn_builder.seal_block(else_block);
-                    let else_return = fn_builder.ins().iconst(types::I32, 0);
-                    let statements = &unconditional_else.as_ref().unwrap().statements;
-                    let mut merge_params = vec![];
-                    for (i, statement) in statements.iter().enumerate() {
-                        let val = self.statement_to_cl(
-                            callee_func_id,
-                            statement,
-                            fn_builder,
-                            obj_module,
-                            call_conv,
-                        )?;
-                        if i == statements.len() - 1
-                            && let Some(v) = val
-                        {
-                            merge_params.push(BlockArg::Value(v));
-                        }
-                    }
 
-                    // Jump to the merge block, passing it the block return value.
-                    fn_builder.ins().jump(merge_block, &merge_params);
+                    if let Some(else_block_ast) = unconditional_else {
+                        let mut merge_params = vec![];
+                        for (i, statement) in else_block_ast.statements.iter().enumerate() {
+                            let val = self.statement_to_cl(
+                                callee_func_id,
+                                statement,
+                                fn_builder,
+                                obj_module,
+                                call_conv,
+                            )?;
+                            if i == else_block_ast.statements.len() - 1
+                                && let Some(v) = val
+                            {
+                                merge_params.push(BlockArg::Value(v));
+                            }
+                        }
+                        // Jump to the merge block, passing it the block return value.
+                        fn_builder.ins().jump(merge_block, &merge_params);
+                    } else {
+                        // No else block, just jump to merge
+                        fn_builder.ins().jump(merge_block, &[]);
+                    }
 
                     // Switch to the merge block for subsequent statements.
                     fn_builder.switch_to_block(merge_block);

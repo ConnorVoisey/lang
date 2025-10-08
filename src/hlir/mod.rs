@@ -207,6 +207,7 @@ impl<'a> Module<'a> {
                 condition: _,
                 block: _,
             } => todo!(),
+            StatementKind::Break { .. } => todo!(),
         }
     }
 

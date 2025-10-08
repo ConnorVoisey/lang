@@ -61,7 +61,7 @@ impl<'a> TypeChecker<'a> {
         });
 
         if let Some(body) = &mut f.body {
-            self.check_block(body, Some(return_type_id), f.symbol_id);
+            self.check_block(body, Some(return_type_id), f.symbol_id, false);
         }
         let fn_symb = self.symbols.resolve_mut(f.symbol_id);
         match &mut fn_symb.kind {
@@ -78,6 +78,7 @@ impl<'a> TypeChecker<'a> {
         statement: &mut AstStatement,
         return_type_id: Option<TypeId>,
         fn_symbol_id: SymbolId,
+        inside_loop: bool,
     ) -> Option<TypeId> {
         match &mut statement.kind {
             StatementKind::Decleration {
@@ -86,7 +87,7 @@ impl<'a> TypeChecker<'a> {
                 symbol_id,
                 expr,
             } => {
-                let new_type_id = self.check_expr(expr, return_type_id, fn_symbol_id);
+                let new_type_id = self.check_expr(expr, return_type_id, fn_symbol_id, inside_loop);
                 let sym = self.symbols.resolve_mut(*symbol_id);
                 match &mut sym.kind {
                     SymbolKind::Var(data) => {
@@ -104,7 +105,9 @@ impl<'a> TypeChecker<'a> {
                 symbol_id,
                 expr,
             } => {
-                let new_type_id = self.check_expr(expr, return_type_id, fn_symbol_id).unwrap();
+                let new_type_id = self
+                    .check_expr(expr, return_type_id, fn_symbol_id, inside_loop)
+                    .unwrap();
                 let sym = self.symbols.resolve(symbol_id.unwrap());
                 match &sym.kind {
                     SymbolKind::Var(data) => {
@@ -128,12 +131,14 @@ impl<'a> TypeChecker<'a> {
                 None
             }
             StatementKind::Expr(ast_expr) => {
-                ast_expr.type_id = self.check_expr(ast_expr, return_type_id, fn_symbol_id);
+                ast_expr.type_id =
+                    self.check_expr(ast_expr, return_type_id, fn_symbol_id, inside_loop);
                 ast_expr.type_id
             }
             StatementKind::ExplicitReturn(expr) => {
-                let explicit_return_type =
-                    self.check_expr(expr, return_type_id, fn_symbol_id).unwrap();
+                let explicit_return_type = self
+                    .check_expr(expr, return_type_id, fn_symbol_id, inside_loop)
+                    .unwrap();
                 if self
                     .arena
                     .unify(explicit_return_type, return_type_id.unwrap())
@@ -156,7 +161,9 @@ impl<'a> TypeChecker<'a> {
                 Some(explicit_return_type)
             }
             StatementKind::BlockReturn { expr, is_fn_return } => {
-                let block_return_id = self.check_expr(expr, return_type_id, fn_symbol_id).unwrap();
+                let block_return_id = self
+                    .check_expr(expr, return_type_id, fn_symbol_id, inside_loop)
+                    .unwrap();
                 if *is_fn_return
                     && self
                         .arena
@@ -182,7 +189,7 @@ impl<'a> TypeChecker<'a> {
             StatementKind::WhileLoop { condition, block } => {
                 let bool_type = self.arena.bool_type;
                 let condition_return = self
-                    .check_expr(condition, return_type_id, fn_symbol_id)
+                    .check_expr(condition, return_type_id, fn_symbol_id, inside_loop)
                     .unwrap();
                 if self.arena.unify(bool_type, condition_return).is_err() {
                     self.errors.push(TypeCheckingError::WhileConditionNotBool {
@@ -190,7 +197,16 @@ impl<'a> TypeChecker<'a> {
                         condition_span: condition.span.clone(),
                     });
                 }
-                self.check_block(block, return_type_id, fn_symbol_id);
+                // Check the block with inside_loop = true
+                self.check_block(block, return_type_id, fn_symbol_id, true);
+                None
+            }
+            StatementKind::Break { span } => {
+                if !inside_loop {
+                    self.errors.push(TypeCheckingError::BreakOutsideLoop {
+                        break_span: span.clone(),
+                    });
+                }
                 None
             }
         }
@@ -200,10 +216,13 @@ impl<'a> TypeChecker<'a> {
         block: &mut AstBlock,
         return_type_id: Option<TypeId>,
         fn_symbol_id: SymbolId,
+        inside_loop: bool,
     ) -> Option<TypeId> {
         let mut block_return_id = None;
         for statement in block.statements.iter_mut() {
-            if let Some(type_id) = self.check_statement(statement, return_type_id, fn_symbol_id) {
+            if let Some(type_id) =
+                self.check_statement(statement, return_type_id, fn_symbol_id, inside_loop)
+            {
                 block_return_id = Some(type_id);
             }
         }
@@ -215,6 +234,7 @@ impl<'a> TypeChecker<'a> {
         expr: &mut AstExpr,
         return_type_id: Option<TypeId>,
         fn_symbol_id: SymbolId,
+        inside_loop: bool,
     ) -> Option<TypeId> {
         match &mut expr.kind {
             ExprKind::Atom(atom) => {
@@ -241,9 +261,11 @@ impl<'a> TypeChecker<'a> {
                     | Op::Minus { left, right }
                     | Op::Multiply { left, right }
                     | Op::Divide { left, right } => {
-                        let lt = self.check_expr(left, return_type_id, fn_symbol_id).unwrap();
+                        let lt = self
+                            .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
+                            .unwrap();
                         let rt = self
-                            .check_expr(right, return_type_id, fn_symbol_id)
+                            .check_expr(right, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
                         let int_t = self.arena.int_type;
                         if self.arena.unify(lt, int_t).is_err() {
@@ -267,7 +289,7 @@ impl<'a> TypeChecker<'a> {
                     }
                     Op::Neg(inner) => {
                         let t = self
-                            .check_expr(inner, return_type_id, fn_symbol_id)
+                            .check_expr(inner, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
                         let int_t = self.arena.int_type;
                         if self.arena.unify(t, int_t).is_err() {
@@ -283,14 +305,14 @@ impl<'a> TypeChecker<'a> {
                     }
                     Op::Ref(inner) => {
                         let inner_t = self
-                            .check_expr(inner, return_type_id, fn_symbol_id)
+                            .check_expr(inner, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
                         let ref_t = self.arena.alloc(TypeKind::Ref(inner_t));
                         expr.type_id = Some(ref_t);
                         expr.type_id
                     }
                     Op::FnCall { ident, args } => {
-                        let _ = self.check_expr(ident, return_type_id, fn_symbol_id);
+                        let _ = self.check_expr(ident, return_type_id, fn_symbol_id, inside_loop);
                         let (params_t, param_symbols, ret_t) = match self
                             .arena
                             .kind(ident.type_id.unwrap())
@@ -310,7 +332,13 @@ impl<'a> TypeChecker<'a> {
                         };
                         let arg_types: Vec<_> = args
                             .iter_mut()
-                            .map(|a| (self.check_expr(a, return_type_id, fn_symbol_id).unwrap(), a))
+                            .map(|a| {
+                                (
+                                    self.check_expr(a, return_type_id, fn_symbol_id, inside_loop)
+                                        .unwrap(),
+                                    a,
+                                )
+                            })
                             .collect();
                         if params_t.len() != arg_types.len() {
                             // Get function name and span for better error message
@@ -371,7 +399,7 @@ impl<'a> TypeChecker<'a> {
                         unconditional_else,
                     } => {
                         let cond_type = self
-                            .check_expr(condition, return_type_id, fn_symbol_id)
+                            .check_expr(condition, return_type_id, fn_symbol_id, inside_loop)
                             .expect("if condition did not have a type");
 
                         // Ensure condition is Bool
@@ -385,24 +413,32 @@ impl<'a> TypeChecker<'a> {
 
                         // all blocks must return the same value
                         let if_block_return_id =
-                            self.check_block(block, return_type_id, fn_symbol_id);
+                            self.check_block(block, return_type_id, fn_symbol_id, inside_loop);
                         match if_block_return_id {
                             None => {
                                 // If block returns unit/nothing, all else blocks must also return nothing
                                 for (_, else_block) in else_ifs.iter_mut() {
-                                    self.check_block(else_block, return_type_id, fn_symbol_id);
+                                    self.check_block(
+                                        else_block,
+                                        return_type_id,
+                                        fn_symbol_id,
+                                        inside_loop,
+                                    );
                                     // Note: we don't error here for simplicity - empty blocks are compatible
                                 }
                                 if let Some(v) = unconditional_else {
-                                    self.check_block(v, return_type_id, fn_symbol_id);
+                                    self.check_block(v, return_type_id, fn_symbol_id, inside_loop);
                                 }
                             }
                             Some(t) => {
                                 // If block returns a value, all else blocks must return compatible type
                                 for (else_cond, else_block) in else_ifs.iter_mut() {
-                                    if let Some(else_t) =
-                                        self.check_block(else_block, return_type_id, fn_symbol_id)
-                                        && self.arena.unify(t, else_t).is_err()
+                                    if let Some(else_t) = self.check_block(
+                                        else_block,
+                                        return_type_id,
+                                        fn_symbol_id,
+                                        inside_loop,
+                                    ) && self.arena.unify(t, else_t).is_err()
                                     {
                                         // Use the whole if expression span for the error
                                         self.errors.push(TypeCheckingError::IfElseBranchMismatch {
@@ -414,8 +450,12 @@ impl<'a> TypeChecker<'a> {
                                     }
                                 }
                                 if let Some(v) = unconditional_else
-                                    && let Some(else_t) =
-                                        self.check_block(v, return_type_id, fn_symbol_id)
+                                    && let Some(else_t) = self.check_block(
+                                        v,
+                                        return_type_id,
+                                        fn_symbol_id,
+                                        inside_loop,
+                                    )
                                     && self.arena.unify(t, else_t).is_err()
                                 {
                                     self.errors.push(TypeCheckingError::IfElseBranchMismatch {
@@ -436,10 +476,10 @@ impl<'a> TypeChecker<'a> {
                     | Op::GreaterThanEq { left, right } => {
                         let int_type = self.arena.int_type;
                         let left_type_id = self
-                            .check_expr(left, return_type_id, fn_symbol_id)
+                            .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
                             .expect("left hand side of comparison expression did not have a type");
                         let right_type_id = self
-                            .check_expr(right, return_type_id, fn_symbol_id)
+                            .check_expr(right, return_type_id, fn_symbol_id, inside_loop)
                             .expect("right hand side of comparison expression did not have a type");
 
                         if self.arena.unify(left_type_id, int_type).is_err()
@@ -456,7 +496,8 @@ impl<'a> TypeChecker<'a> {
                     }
                     Op::Dot { left: _, right: _ } => todo!(),
                     Op::Block(ast_block) => {
-                        let type_id = self.check_block(ast_block, return_type_id, fn_symbol_id);
+                        let type_id =
+                            self.check_block(ast_block, return_type_id, fn_symbol_id, inside_loop);
                         expr.type_id = type_id;
                         type_id
                     }

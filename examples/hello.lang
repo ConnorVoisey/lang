@@ -7,9 +7,13 @@ extern "C" {
 
 fn main() Int {
     let num = 0;
+    let x = 20;
 
     while num < 10 {
         num = num + 1;
+        if (x - num) < 15 {
+            break;
+        };
     }
 
     printf(&c"%d
