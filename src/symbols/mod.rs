@@ -237,30 +237,13 @@ impl SymbolTable {
 
     pub fn register_statement(&mut self, statement: &mut AstStatement) {
         match &mut statement.kind {
-            StatementKind::Decleration {
-                symbol_id: _,
-                ident_id: _,
-                ident_token_at: _,
-                expr,
-            } => {
+            StatementKind::Decleration { expr, .. }
+            | StatementKind::Assignment { expr, .. }
+            | StatementKind::BlockReturn { expr, .. } => {
                 self.register_expr(expr);
             }
-            StatementKind::Assignment {
-                ident_id: _,
-                ident_token_at: _,
-                expr,
-                symbol_id: _,
-            } => {
-                self.register_expr(expr);
-            }
-            StatementKind::Expr(ast_expr) => {
+            StatementKind::Expr(ast_expr) | StatementKind::ExplicitReturn(ast_expr) => {
                 self.register_expr(ast_expr);
-            }
-            StatementKind::ExplicitReturn(ast_expr) => {
-                self.register_expr(ast_expr);
-            }
-            StatementKind::BlockReturn { expr, .. } => {
-                self.register_expr(expr);
             }
             StatementKind::WhileLoop { condition, block } => {
                 self.register_expr(condition);
@@ -270,38 +253,23 @@ impl SymbolTable {
     }
     pub fn register_expr(&mut self, expr: &mut AstExpr) {
         match &mut expr.kind {
-            ExprKind::Atom(atom) => match atom {
-                Atom::Ident((ident_id, symbol_id)) => {
+            ExprKind::Atom(atom) => {
+                if let Atom::Ident((ident_id, symbol_id)) = atom {
                     *symbol_id = self.lookup(*ident_id);
                 }
-                _ => (),
-            },
+            }
             ExprKind::Op(op) => match &mut **op {
-                Op::Add { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::Divide { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::Minus { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::LessThan { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::LessThanEq { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::GreaterThan { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
-                Op::GreaterThanEq { left, right } => {
+                Op::Add { left, right }
+                | Op::Minus { left, right }
+                | Op::Multiply { left, right }
+                | Op::Divide { left, right }
+                | Op::LessThan { left, right }
+                | Op::LessThanEq { left, right }
+                | Op::GreaterThan { left, right }
+                | Op::GreaterThanEq { left, right }
+                | Op::Dot { left, right }
+                | Op::Equivalent { left, right }
+                | Op::BracketOpen { left, right } => {
                     self.register_expr(left);
                     self.register_expr(right);
                 }
@@ -311,32 +279,16 @@ impl SymbolTable {
                 Op::Ref(ast_expr) => {
                     self.register_expr(ast_expr);
                 }
-                Op::Multiply { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
                 Op::FnCall { ident, args } => {
                     self.register_expr(ident);
                     args.iter_mut().for_each(|expr| self.register_expr(expr));
                 }
-                Op::Dot { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
-                }
                 Op::Block(block) => {
                     self.register_block(block);
-                }
-                Op::Equivalent { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
                 }
                 Op::SquareOpen { left, args } => {
                     self.register_expr(left);
                     args.iter_mut().for_each(|expr| self.register_expr(expr));
-                }
-                Op::BracketOpen { left, right } => {
-                    self.register_expr(left);
-                    self.register_expr(right);
                 }
                 Op::IfCond {
                     condition,
