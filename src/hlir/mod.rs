@@ -243,6 +243,7 @@ impl<'a> Module<'a> {
                     else_ifs: _,
                     unconditional_else: _,
                 } => todo!(),
+                Op::StructCreate { ident: _, args: _ } => todo!(),
             },
         }
     }

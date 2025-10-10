@@ -4,11 +4,14 @@ use crate::{
         ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
+        ast_struct::AstStruct,
     },
+    interner::IdentId,
     symbols::{SymbolId, SymbolKind, SymbolTable},
     type_checker::error::TypeCheckingError,
     types::{TypeArena, TypeId, TypeKind},
 };
+use rustc_hash::FxHashMap;
 
 pub mod error;
 
@@ -29,6 +32,9 @@ impl<'a> TypeChecker<'a> {
     }
 
     pub fn check_ast(&mut self, ast: &mut Ast) {
+        for s in &mut ast.structs {
+            self.check_struct(s);
+        }
         for f in &mut ast.extern_fns {
             self.check_func(f);
         }
@@ -38,6 +44,27 @@ impl<'a> TypeChecker<'a> {
         // later: check structs, globals, etc.
     }
 
+    fn check_struct(&mut self, s: &mut AstStruct) {
+        // Ensure the struct has a TypeId (may already be set from symbol registration)
+        let struct_type_id = if let Some(type_id) = s.type_id {
+            type_id
+        } else {
+            let type_id = self.arena.intern_struct_symbol(s.struct_id);
+            s.type_id = Some(type_id);
+            type_id
+        };
+
+        let new_fields: Vec<_> = s
+            .fields
+            .iter()
+            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2)))
+            .collect();
+
+        let struct_type = self.arena.kind_mut(struct_type_id);
+        if let TypeKind::Struct { fields, .. } = struct_type {
+            *fields = new_fields;
+        }
+    }
     fn check_func(&mut self, f: &mut AstFunc) {
         let return_type_id = self.arena.var_type_to_typeid(&f.return_type);
 
@@ -248,7 +275,10 @@ impl<'a> TypeChecker<'a> {
                         match &sym.kind {
                             SymbolKind::Fn(data) => data.fn_type_id.unwrap(),
                             SymbolKind::Var(data) => data.type_id.unwrap(),
-                            SymbolKind::Struct(_) => todo!(),
+                            SymbolKind::Struct(data) => {
+                                // Return the struct type for struct identifiers
+                                self.arena.intern_struct_symbol(data.struct_id)
+                            }
                             SymbolKind::FnArg(data) => data.type_id.unwrap(),
                         }
                     }
@@ -494,7 +524,36 @@ impl<'a> TypeChecker<'a> {
                         }
                         Some(self.arena.bool_type)
                     }
-                    Op::Dot { left: _, right: _ } => todo!(),
+                    Op::Dot { left, right } => {
+                        let struct_type_id = self
+                            .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
+                            .unwrap();
+                        let expected_fields = match self.arena.kind(struct_type_id) {
+                            TypeKind::Struct { fields, .. } => fields,
+                            _ => {
+                                self.errors.push(TypeCheckingError::Mismatch {
+                                    type_a_str: "struct".to_string(),
+                                    type_a_span: left.span.clone(),
+                                    type_b_str: self.arena.id_to_string(struct_type_id),
+                                    type_b_span: left.span.clone(),
+                                });
+                                return None;
+                            }
+                        };
+                        let type_id = match right.kind {
+                            ExprKind::Atom(Atom::Ident((ident_id, _))) => {
+                                let found_field = expected_fields.iter().find(|f| f.0 == ident_id);
+                                found_field.map(|f| f.1)
+                            }
+                            _ => {
+                                todo!(
+                                    "could not find field in this struct with this ident, add error handling herre"
+                                )
+                            }
+                        };
+                        expr.type_id = type_id;
+                        type_id
+                    }
                     Op::Block(ast_block) => {
                         let type_id =
                             self.check_block(ast_block, return_type_id, fn_symbol_id, inside_loop);
@@ -505,6 +564,112 @@ impl<'a> TypeChecker<'a> {
                     Op::Equivalent { left: _, right: _ } => todo!(),
                     Op::SquareOpen { left: _, args: _ } => todo!(),
                     Op::BracketOpen { left: _, right: _ } => todo!(),
+                    Op::StructCreate { ident, args } => {
+                        // Type check the struct identifier expression
+                        let struct_type_id = self
+                            .check_expr(ident, return_type_id, fn_symbol_id, inside_loop)
+                            .unwrap();
+                        let struct_type_id = self.arena.find(struct_type_id);
+
+                        // Extract struct_id and field definitions
+                        let expected_fields = match self.arena.kind(struct_type_id) {
+                            TypeKind::Struct { fields, .. } => fields.clone(),
+                            _ => {
+                                self.errors.push(TypeCheckingError::Mismatch {
+                                    type_a_str: "struct".to_string(),
+                                    type_a_span: ident.span.clone(),
+                                    type_b_str: self.arena.id_to_string(struct_type_id),
+                                    type_b_span: ident.span.clone(),
+                                });
+                                return None;
+                            }
+                        };
+
+                        // Build FxHashMap of provided fields: IdentId -> (TypeId, Span)
+                        let mut provided: FxHashMap<IdentId, (TypeId, usize)> =
+                            FxHashMap::default();
+                        for (i, (field_ident, field_expr)) in args.iter_mut().enumerate() {
+                            let field_type = self
+                                .check_expr(field_expr, return_type_id, fn_symbol_id, inside_loop)
+                                .unwrap();
+                            if provided.insert(*field_ident, (field_type, i)).is_some() {
+                                // Duplicate field name
+                                self.errors.push(TypeCheckingError::Mismatch {
+                                    type_a_str: format!(
+                                        "duplicate field '{}'",
+                                        self.symbols.interner.read().resolve(*field_ident)
+                                    ),
+                                    type_a_span: field_expr.span.clone(),
+                                    type_b_str: "unique field".to_string(),
+                                    type_b_span: field_expr.span.clone(),
+                                });
+                            }
+                        }
+
+                        // Validate each expected field
+                        for (expected_ident, expected_type) in expected_fields.iter() {
+                            match provided.remove(expected_ident) {
+                                Some((provided_type, arg_index)) => {
+                                    if self.arena.unify(*expected_type, provided_type).is_err() {
+                                        let field_name = self
+                                            .symbols
+                                            .interner
+                                            .read()
+                                            .resolve(*expected_ident)
+                                            .to_string();
+                                        self.errors.push(TypeCheckingError::Mismatch {
+                                            type_a_str: format!(
+                                                "field '{}' has type {}",
+                                                field_name,
+                                                self.arena.id_to_string(provided_type)
+                                            ),
+                                            type_a_span: args[arg_index].1.span.clone(),
+                                            type_b_str: format!(
+                                                "expected type {}",
+                                                self.arena.id_to_string(*expected_type)
+                                            ),
+                                            type_b_span: args[arg_index].1.span.clone(),
+                                        });
+                                    }
+                                }
+                                None => {
+                                    let field_name = self
+                                        .symbols
+                                        .interner
+                                        .read()
+                                        .resolve(*expected_ident)
+                                        .to_string();
+                                    self.errors.push(TypeCheckingError::Mismatch {
+                                        type_a_str: format!("missing field '{}'", field_name),
+                                        type_a_span: expr.span.clone(),
+                                        type_b_str: format!("field '{}' is required", field_name),
+                                        type_b_span: ident.span.clone(),
+                                    });
+                                }
+                            }
+                        }
+
+                        // Check for extra fields
+                        if !provided.is_empty() {
+                            for (extra_ident, (_, arg_index)) in provided.iter() {
+                                let field_name = self
+                                    .symbols
+                                    .interner
+                                    .read()
+                                    .resolve(*extra_ident)
+                                    .to_string();
+                                self.errors.push(TypeCheckingError::Mismatch {
+                                    type_a_str: format!("unexpected field '{}'", field_name),
+                                    type_a_span: args[*arg_index].1.span.clone(),
+                                    type_b_str: "no such field in struct".to_string(),
+                                    type_b_span: ident.span.clone(),
+                                });
+                            }
+                        }
+
+                        expr.type_id = Some(struct_type_id);
+                        Some(struct_type_id)
+                    }
                 }
             }
         }

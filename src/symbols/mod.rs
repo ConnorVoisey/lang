@@ -9,7 +9,7 @@ use crate::{
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
-    types::{TypeArena, TypeId, TypeKind},
+    types::{StructId, TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
 
@@ -43,7 +43,7 @@ pub struct VarSymbolData {
 
 #[derive(Debug)]
 pub struct StructSymbolData {
-    pub struct_id: usize,
+    pub struct_id: StructId,
     pub full_def_span: Span,
 }
 
@@ -124,6 +124,10 @@ impl SymbolTable {
     pub fn register_ast(&mut self, ast: &mut Ast, types: &mut TypeArena) -> Vec<SymbolError> {
         let mut errs = vec![];
 
+        for struct_decl in ast.structs.iter_mut() {
+            self.register_struct(types, struct_decl, &mut errs);
+        }
+
         for func in ast.extern_fns.iter_mut() {
             self.register_fn(types, func, &mut errs);
         }
@@ -132,6 +136,58 @@ impl SymbolTable {
             self.register_fn(types, func, &mut errs);
         }
         errs
+    }
+
+    pub fn register_struct(
+        &mut self,
+        types: &mut TypeArena,
+        struct_decl: &mut crate::ast::ast_struct::AstStruct,
+        _errors: &mut Vec<SymbolError>,
+    ) {
+        let sym_id = struct_decl.symbol_id;
+        let struct_id = match &self.resolve(sym_id).kind {
+            SymbolKind::Struct(data) => data.struct_id,
+            t => unreachable!("struct_symbol should always have SymbolKind::Struct, got: {t:?}"),
+        };
+
+        let mut field_type_ids = Vec::with_capacity(struct_decl.fields.len());
+        let mut fields_for_typekind = Vec::with_capacity(struct_decl.fields.len());
+
+        for (field_ident_id, _field_token_at, field_var_type) in &mut struct_decl.fields {
+            let field_type_id = match field_var_type {
+                VarType::Custom((ident_id, symbol_id_opt)) => {
+                    *symbol_id_opt = self.lookup(*ident_id);
+                    match symbol_id_opt {
+                        Some(symbol_id) => {
+                            let symbol = self.resolve(*symbol_id);
+                            match &symbol.kind {
+                                SymbolKind::Struct(data) => {
+                                    types.intern_struct_symbol(data.struct_id)
+                                }
+                                _ => types.var_type_to_typeid(field_var_type),
+                            }
+                        }
+                        None => types.var_type_to_typeid(field_var_type),
+                    }
+                }
+                _ => types.var_type_to_typeid(field_var_type),
+            };
+            field_type_ids.push(Some(field_type_id));
+            fields_for_typekind.push((*field_ident_id, field_type_id));
+        }
+
+        // Intern the struct type (creates or returns existing TypeId)
+        let struct_type_id = types.intern_struct_symbol(struct_id);
+
+        // Update the struct's TypeKind with the computed field types
+        let struct_type = types.kind_mut(struct_type_id);
+        if let TypeKind::Struct { fields, .. } = struct_type {
+            *fields = fields_for_typekind;
+        }
+
+        struct_decl.type_id = Some(struct_type_id);
+        struct_decl.field_type_ids = field_type_ids;
+        struct_decl.struct_id = struct_id;
     }
 
     pub fn register_fn(
@@ -311,6 +367,12 @@ impl SymbolTable {
                         for statement in else_block.statements.iter_mut() {
                             self.register_statement(statement);
                         }
+                    }
+                }
+                Op::StructCreate { ident, args } => {
+                    self.register_expr(ident);
+                    for (_, expr) in args.iter_mut() {
+                        self.register_expr(expr);
                     }
                 }
             },

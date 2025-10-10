@@ -87,6 +87,10 @@ pub enum Op {
         else_ifs: Vec<(AstExpr, AstBlock)>,
         unconditional_else: Option<AstBlock>,
     },
+    StructCreate {
+        ident: AstExpr,
+        args: Vec<(IdentId, AstExpr)>,
+    },
 }
 
 #[derive(Debug)]
@@ -264,7 +268,6 @@ impl Ast {
             }
         };
 
-        // advance past the token we just handled
         self.next_token();
 
         // postfix / infix loop
@@ -277,7 +280,6 @@ impl Ast {
                     TokenKind::CurlyBracketClose => break,
                     TokenKind::SemiColon => break,
                     _ => {
-                        // replace panic with a diagnostic and break
                         self.errs
                             .push(AstParseError::ExpectedOperator { token: v.clone() });
                         break;
@@ -428,6 +430,71 @@ impl Ast {
                         })
                     }
 
+                    TokenKind::CurlyBracketOpen => {
+                        let mut args = vec![];
+
+                        // Parse fields if not empty
+                        if !matches!(
+                            self.curr_token(),
+                            Some(Token {
+                                kind: TokenKind::CurlyBracketClose,
+                                ..
+                            })
+                        ) {
+                            while let Some(Token {
+                                kind: TokenKind::Ident(ident_id),
+                                ..
+                            }) = self.curr_token()
+                            {
+                                let ident_cloned = *ident_id;
+                                match self.next_token() {
+                                    Some(Token {
+                                        kind: TokenKind::Colon,
+                                        ..
+                                    }) => {
+                                        self.next_token();
+                                        let expr = self.parse_expr(0, symbols)?;
+                                        args.push((ident_cloned, expr));
+                                        // After parse_expr, cursor is at comma or '}'
+                                        if let Some(Token {
+                                            kind: TokenKind::Comma,
+                                            ..
+                                        }) = self.curr_token()
+                                        {
+                                            self.next_token();
+                                        }
+                                    }
+                                    t => {
+                                        dbg!(t);
+                                        todo!();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Consume '}'
+                        if matches!(
+                            self.curr_token(),
+                            Some(Token {
+                                kind: TokenKind::CurlyBracketClose,
+                                ..
+                            })
+                        ) {
+                            self.next_token();
+                        } else {
+                            // TODO: proper error handling
+                        }
+
+                        Some(AstExpr {
+                            span: Span {
+                                start: self.tokens[start_token_at].span.start,
+                                end: self.tokens[self.curr_token_i()].span.end,
+                            },
+                            kind: ExprKind::Op(Box::new(Op::StructCreate { ident: lhs?, args })),
+                            type_id: None,
+                        })
+                    }
+
                     _ => {
                         // fallback, should not happen — record and continue
                         if let Some(tok) = self.curr_token().cloned() {
@@ -562,7 +629,9 @@ fn prefix_binding_power(op_token: &TokenKind) -> ((), u8) {
 fn postfix_binding_power(op_token: &TokenKind) -> Option<(u8, ())> {
     let res = match op_token {
         // Op::PostQuestion |
-        TokenKind::SquareBracketOpen | TokenKind::BracketOpen => (7, ()),
+        TokenKind::SquareBracketOpen | TokenKind::BracketOpen | TokenKind::CurlyBracketOpen => {
+            (7, ())
+        }
         _ => return None,
     };
     Some(res)
@@ -655,6 +724,18 @@ impl Ast {
                     right: self.expr_to_debug(right),
                 },
                 Op::IfCond { .. } => todo!(),
+                Op::StructCreate { ident, args } => DebugOp::StructCreate {
+                    ident: self.expr_to_debug(ident),
+                    args: args
+                        .iter()
+                        .map(|(ident, expr)| {
+                            (
+                                self.interner.read().resolve(*ident).to_string(),
+                                self.expr_to_debug(expr),
+                            )
+                        })
+                        .collect(),
+                },
             })),
         }
     }
@@ -729,6 +810,10 @@ pub enum DebugOp {
     BracketOpen {
         left: DebugExprKind,
         right: DebugExprKind,
+    },
+    StructCreate {
+        ident: DebugExprKind,
+        args: Vec<(String, DebugExprKind)>,
     },
 }
 #[cfg(test)]
@@ -970,6 +1055,94 @@ mod test {
                 DebugExprKind::Atom(DebugAtom::Str("bar".to_string())),
                 DebugExprKind::Atom(DebugAtom::CStr("baz".to_string())),
             ],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_empty() {
+        let debug_expr = parse_debug("Foo {};");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Foo".to_string())),
+            args: vec![],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_single_field() {
+        let debug_expr = parse_debug("Foo { num: 20 };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Foo".to_string())),
+            args: vec![("num".to_string(), DebugExprKind::Atom(DebugAtom::Int(20)))],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_multiple_fields() {
+        let debug_expr = parse_debug("Point { x: 10, y: 20 };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Point".to_string())),
+            args: vec![
+                ("x".to_string(), DebugExprKind::Atom(DebugAtom::Int(10))),
+                ("y".to_string(), DebugExprKind::Atom(DebugAtom::Int(20))),
+            ],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_trailing_comma() {
+        let debug_expr = parse_debug("Foo { num: 42, };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Foo".to_string())),
+            args: vec![("num".to_string(), DebugExprKind::Atom(DebugAtom::Int(42)))],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_nested() {
+        let debug_expr = parse_debug("Outer { inner: Inner { val: 5 } };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Outer".to_string())),
+            args: vec![(
+                "inner".to_string(),
+                DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+                    ident: DebugExprKind::Atom(DebugAtom::Ident("Inner".to_string())),
+                    args: vec![("val".to_string(), DebugExprKind::Atom(DebugAtom::Int(5)))],
+                })),
+            )],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_with_expressions() {
+        let debug_expr = parse_debug("Foo { num: 10 + 20 };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("Foo".to_string())),
+            args: vec![(
+                "num".to_string(),
+                DebugExprKind::Op(Box::new(DebugOp::Add {
+                    left: DebugExprKind::Atom(DebugAtom::Int(10)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(20)),
+                })),
+            )],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn struct_create_chained_with_dot() {
+        let debug_expr = parse_debug("Foo { num: 20 }.num;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Dot {
+            left: DebugExprKind::Op(Box::new(DebugOp::StructCreate {
+                ident: DebugExprKind::Atom(DebugAtom::Ident("Foo".to_string())),
+                args: vec![("num".to_string(), DebugExprKind::Atom(DebugAtom::Int(20)))],
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Ident("num".to_string())),
         }));
         assert_eq!(debug_expr, expected);
     }

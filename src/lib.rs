@@ -35,7 +35,7 @@ impl ModParser {
         if !ast.errs.is_empty() {
             return Err(CompliationError::AstParseError(ast.errs));
         }
-        dbg!(&ast.fns[0]);
+        dbg!(&ast);
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 

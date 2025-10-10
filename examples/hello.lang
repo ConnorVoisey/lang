@@ -5,18 +5,16 @@ extern "C" {
     fn printf(str &CStr, val Int) Int;
 }
 
-fn main() Int {
-    let num = 0;
-    let x = 20;
+struct Foo {
+    num Int,
+}
 
-    while num < 10 {
-        num = num + 1;
-        if (x - num) < 15 {
-            break;
-        };
-    }
+fn main() Int {
+    let foo = Foo {
+        num: 20,
+    };
 
     printf(&c"%d
-", num);
+", foo.num);
     0
 }

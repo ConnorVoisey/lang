@@ -18,6 +18,7 @@ pub enum TokenKind {
     Str(String),
     Int(i32),
     SemiColon,
+    Colon,
     DoubleColon,
     BracketOpen,
     BracketClose,
@@ -103,12 +104,12 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
                     _ => {
-                        lexer.errs.push(LexerError::UnhandledChar {
-                            char: ':',
+                        lexer.tokens.push(Token {
                             span: Span {
                                 start: i,
                                 end: i + 1,
                             },
+                            kind: TokenKind::Colon,
                         });
                         continue;
                     }

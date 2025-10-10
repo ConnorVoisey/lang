@@ -4,6 +4,9 @@ use rustc_hash::FxHashMap;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeId(pub usize);
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StructId(pub usize);
+
 #[derive(Debug, Clone)]
 pub enum TypeKind {
     Int,
@@ -13,7 +16,7 @@ pub enum TypeKind {
     Void,
     Bool,
     Struct {
-        struct_id: usize,
+        struct_id: StructId,
         fields: Vec<(crate::interner::IdentId, TypeId)>,
     },
     Fn {
@@ -32,7 +35,7 @@ pub struct TypeArena {
     kinds: Vec<TypeKind>,
     parent: Vec<TypeId>, // union–find parent links
     rank: Vec<u32>,      // union–find ranks for balancing
-    struct_symbol_to_type: FxHashMap<usize, TypeId>,
+    pub struct_symbol_to_type: Vec<Option<TypeId>>,
 
     // Cached primitive types
     pub int_type: TypeId,
@@ -54,7 +57,7 @@ impl TypeArena {
             kinds: vec![],
             parent: Vec::new(),
             rank: Vec::new(),
-            struct_symbol_to_type: FxHashMap::default(),
+            struct_symbol_to_type: Vec::new(),
             // Initialize with dummy values, will be set below
             int_type: TypeId(0),
             uint_type: TypeId(0),
@@ -109,6 +112,10 @@ impl TypeArena {
 
     pub fn kind(&self, t: TypeId) -> &TypeKind {
         &self.kinds[t.0]
+    }
+
+    pub fn kind_mut(&mut self, t: TypeId) -> &mut TypeKind {
+        &mut self.kinds[t.0]
     }
 
     fn union(&mut self, a: TypeId, b: TypeId) {
@@ -198,16 +205,24 @@ impl TypeArena {
         }
     }
 
-    pub fn intern_struct_symbol(&mut self, struct_symbol_index: usize) -> TypeId {
-        if let Some(&t) = self.struct_symbol_to_type.get(&struct_symbol_index) {
-            return t;
+    pub fn intern_struct_symbol(&mut self, struct_id: StructId) -> TypeId {
+        // Ensure vec is large enough
+        if struct_id.0 >= self.struct_symbol_to_type.len() {
+            self.struct_symbol_to_type.resize(struct_id.0 + 1, None);
         }
-        let id = self.alloc(TypeKind::Struct {
-            struct_id: struct_symbol_index,
+
+        // Return existing TypeId if already interned
+        if let Some(type_id) = self.struct_symbol_to_type[struct_id.0] {
+            return type_id;
+        }
+
+        // Create new TypeId for this struct
+        let type_id = self.alloc(TypeKind::Struct {
+            struct_id,
             fields: vec![],
         });
-        self.struct_symbol_to_type.insert(struct_symbol_index, id);
-        id
+        self.struct_symbol_to_type[struct_id.0] = Some(type_id);
+        type_id
     }
 
     pub fn var_type_to_typeid(&mut self, v: &VarType) -> TypeId {
