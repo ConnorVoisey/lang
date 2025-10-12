@@ -14,6 +14,7 @@ pub mod lexer;
 pub mod symbols;
 pub mod type_checker;
 pub mod types;
+pub mod struct_layout;
 
 #[derive(Debug)]
 pub struct ModParser {}

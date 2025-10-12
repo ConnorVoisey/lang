@@ -9,7 +9,7 @@ use crate::{
     interner::SharedInterner,
     lexer::TokenKind,
     symbols::{SymbolKind, SymbolTable},
-    types::{TypeArena, TypeKind},
+    types::{TypeArena, TypeKind, TypeKindStruct},
 };
 use cranelift::{
     codegen::{
@@ -734,10 +734,10 @@ impl ToClType for TypeKind {
             TypeKind::Str => todo!(),
             TypeKind::CStr => todo!(),
             TypeKind::Void => todo!(),
-            TypeKind::Struct {
+            TypeKind::Struct(TypeKindStruct {
                 struct_id: _,
                 fields: _,
-            } => todo!(),
+            }) => todo!(),
             TypeKind::Fn { .. } => todo!(),
             TypeKind::Ref(_) => types::I64,
             TypeKind::Unknown => todo!(),

@@ -1,15 +1,12 @@
 use crate::{
     ast::{
-        Ast, VarType,
-        ast_block::{AstBlock, AstStatement, StatementKind},
-        ast_expr::{AstExpr, Atom, ExprKind, Op},
-        ast_fn::AstFunc,
+        ast_block::{AstBlock, AstStatement, StatementKind}, ast_expr::{AstExpr, Atom, ExprKind, Op}, ast_fn::AstFunc, Ast, VarType
     },
     cl_export::cl_vals::CraneliftId,
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
-    types::{StructId, TypeArena, TypeId, TypeKind},
+    types::{StructId, TypeArena, TypeId, TypeKind, TypeKindStruct},
 };
 use rustc_hash::FxHashMap;
 
@@ -181,7 +178,7 @@ impl SymbolTable {
 
         // Update the struct's TypeKind with the computed field types
         let struct_type = types.kind_mut(struct_type_id);
-        if let TypeKind::Struct { fields, .. } = struct_type {
+        if let TypeKind::Struct (TypeKindStruct{ fields, .. }) = struct_type {
             *fields = fields_for_typekind;
         }
 

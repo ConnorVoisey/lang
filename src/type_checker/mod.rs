@@ -9,7 +9,7 @@ use crate::{
     interner::IdentId,
     symbols::{SymbolId, SymbolKind, SymbolTable},
     type_checker::error::TypeCheckingError,
-    types::{TypeArena, TypeId, TypeKind},
+    types::{TypeArena, TypeId, TypeKind, TypeKindStruct},
 };
 use rustc_hash::FxHashMap;
 
@@ -61,7 +61,7 @@ impl<'a> TypeChecker<'a> {
             .collect();
 
         let struct_type = self.arena.kind_mut(struct_type_id);
-        if let TypeKind::Struct { fields, .. } = struct_type {
+        if let TypeKind::Struct(TypeKindStruct { fields, .. }) = struct_type {
             *fields = new_fields;
         }
     }
@@ -529,7 +529,7 @@ impl<'a> TypeChecker<'a> {
                             .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
                         let expected_fields = match self.arena.kind(struct_type_id) {
-                            TypeKind::Struct { fields, .. } => fields,
+                            TypeKind::Struct (TypeKindStruct{ fields, .. }) => fields,
                             _ => {
                                 self.errors.push(TypeCheckingError::Mismatch {
                                     type_a_str: "struct".to_string(),
@@ -573,7 +573,7 @@ impl<'a> TypeChecker<'a> {
 
                         // Extract struct_id and field definitions
                         let expected_fields = match self.arena.kind(struct_type_id) {
-                            TypeKind::Struct { fields, .. } => fields.clone(),
+                            TypeKind::Struct (TypeKindStruct{ fields, .. }) => fields.clone(),
                             _ => {
                                 self.errors.push(TypeCheckingError::Mismatch {
                                     type_a_str: "struct".to_string(),

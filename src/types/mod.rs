@@ -15,10 +15,7 @@ pub enum TypeKind {
     CStr,
     Void,
     Bool,
-    Struct {
-        struct_id: StructId,
-        fields: Vec<(crate::interner::IdentId, TypeId)>,
-    },
+    Struct(TypeKindStruct),
     Fn {
         params: Vec<TypeId>,
         param_symbols: Vec<SymbolId>,
@@ -28,6 +25,12 @@ pub enum TypeKind {
     Unknown,
     // Type variables are just IDs managed by union–find
     Var,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeKindStruct {
+    pub struct_id: StructId,
+    pub fields: Vec<(crate::interner::IdentId, TypeId)>,
 }
 
 #[derive(Debug)]
@@ -189,7 +192,10 @@ impl TypeArena {
                 }
                 self.unify(r1, r2)
             }
-            (TypeKind::Struct { struct_id: s1, .. }, TypeKind::Struct { struct_id: s2, .. }) => {
+            (
+                TypeKind::Struct(TypeKindStruct { struct_id: s1, .. }),
+                TypeKind::Struct(TypeKindStruct { struct_id: s2, .. }),
+            ) => {
                 if s1 != s2 {
                     return Err(UnifyErrorWithoutSpan::Mismatch(
                         ra,
@@ -217,10 +223,10 @@ impl TypeArena {
         }
 
         // Create new TypeId for this struct
-        let type_id = self.alloc(TypeKind::Struct {
+        let type_id = self.alloc(TypeKind::Struct(TypeKindStruct {
             struct_id,
             fields: vec![],
-        });
+        }));
         self.struct_symbol_to_type[struct_id.0] = Some(type_id);
         type_id
     }
