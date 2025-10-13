@@ -1,5 +1,8 @@
-use crate::{ast::VarType, symbols::SymbolId};
-use rustc_hash::FxHashMap;
+use crate::{
+    ast::VarType,
+    interner::IdentId,
+    symbols::{SymbolId, SymbolKind, SymbolTable},
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeId(pub usize);
@@ -15,7 +18,7 @@ pub enum TypeKind {
     CStr,
     Void,
     Bool,
-    Struct(TypeKindStruct),
+    Struct(StructId),
     Fn {
         params: Vec<TypeId>,
         param_symbols: Vec<SymbolId>,
@@ -35,10 +38,11 @@ pub struct TypeKindStruct {
 
 #[derive(Debug)]
 pub struct TypeArena {
-    kinds: Vec<TypeKind>,
+    pub kinds: Vec<TypeKind>,
     parent: Vec<TypeId>, // union–find parent links
     rank: Vec<u32>,      // union–find ranks for balancing
     pub struct_symbol_to_type: Vec<Option<TypeId>>,
+    pub struct_field_types: Vec<Vec<(IdentId, TypeId)>>,
 
     // Cached primitive types
     pub int_type: TypeId,
@@ -61,6 +65,7 @@ impl TypeArena {
             parent: Vec::new(),
             rank: Vec::new(),
             struct_symbol_to_type: Vec::new(),
+            struct_field_types: Vec::new(),
             // Initialize with dummy values, will be set below
             int_type: TypeId(0),
             uint_type: TypeId(0),
@@ -192,10 +197,7 @@ impl TypeArena {
                 }
                 self.unify(r1, r2)
             }
-            (
-                TypeKind::Struct(TypeKindStruct { struct_id: s1, .. }),
-                TypeKind::Struct(TypeKindStruct { struct_id: s2, .. }),
-            ) => {
+            (TypeKind::Struct(s1), TypeKind::Struct(s2)) => {
                 if s1 != s2 {
                     return Err(UnifyErrorWithoutSpan::Mismatch(
                         ra,
@@ -223,15 +225,12 @@ impl TypeArena {
         }
 
         // Create new TypeId for this struct
-        let type_id = self.alloc(TypeKind::Struct(TypeKindStruct {
-            struct_id,
-            fields: vec![],
-        }));
+        let type_id = self.alloc(TypeKind::Struct(struct_id));
         self.struct_symbol_to_type[struct_id.0] = Some(type_id);
         type_id
     }
 
-    pub fn var_type_to_typeid(&mut self, v: &VarType) -> TypeId {
+    pub fn var_type_to_typeid(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeId {
         match v {
             VarType::Void => self.alloc(TypeKind::Void),
             VarType::Int => self.alloc(TypeKind::Int),
@@ -240,10 +239,27 @@ impl TypeArena {
             VarType::CStr => self.alloc(TypeKind::CStr),
             VarType::Bool => self.alloc(TypeKind::Bool),
             VarType::Ref(inner) => {
-                let inner_id = self.var_type_to_typeid(inner);
+                let inner_id = self.var_type_to_typeid(inner, symbols);
                 self.alloc(TypeKind::Ref(inner_id))
             }
-            VarType::Custom(_) => self.alloc(TypeKind::Unknown),
+            VarType::Custom((_, symbol_id)) => match symbol_id {
+                Some(symbol_id) => {
+                    let symbol = symbols.resolve(*symbol_id);
+                    let kind = match &symbol.kind {
+                        SymbolKind::Fn(_) => TypeKind::Fn {
+                            params: todo!(),
+                            param_symbols: todo!(),
+                            ret: todo!(),
+                        },
+                        SymbolKind::FnArg(_) => todo!(),
+                        SymbolKind::Var(_) => todo!(),
+                        SymbolKind::Struct(struct_data) => TypeKind::Struct(struct_data.struct_id),
+                    };
+                    self.alloc(kind)
+                }
+                None => self.alloc(TypeKind::Unknown),
+            },
+
             VarType::CChar => todo!(),
         }
     }
@@ -266,5 +282,13 @@ impl TypeArena {
 
     pub fn id_to_string(&self, type_id: TypeId) -> String {
         self.kind_to_string(self.kind(type_id))
+    }
+
+    pub fn get_struct_fields(&self, struct_id: StructId) -> &Vec<(IdentId, TypeId)> {
+        &self.struct_field_types[struct_id.0]
+    }
+
+    pub fn set_struct_fields(&mut self, struct_id: StructId, fields: Vec<(IdentId, TypeId)>) {
+        self.struct_field_types.insert(struct_id.0, fields);
     }
 }

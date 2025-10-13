@@ -9,7 +9,7 @@ use crate::{
     interner::IdentId,
     symbols::{SymbolId, SymbolKind, SymbolTable},
     type_checker::error::TypeCheckingError,
-    types::{TypeArena, TypeId, TypeKind, TypeKindStruct},
+    types::{TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
 
@@ -33,7 +33,10 @@ impl<'a> TypeChecker<'a> {
 
     pub fn check_ast(&mut self, ast: &mut Ast) {
         for s in &mut ast.structs {
-            self.check_struct(s);
+            self.check_struct_name(s);
+        }
+        for s in &mut ast.structs {
+            self.check_struct_fields(s);
         }
         for f in &mut ast.extern_fns {
             self.check_func(f);
@@ -44,38 +47,46 @@ impl<'a> TypeChecker<'a> {
         // later: check structs, globals, etc.
     }
 
-    fn check_struct(&mut self, s: &mut AstStruct) {
+    fn check_struct_name(&mut self, s: &mut AstStruct) {
         // Ensure the struct has a TypeId (may already be set from symbol registration)
+        if s.type_id.is_none() {
+            let type_id = self.arena.intern_struct_symbol(s.struct_id);
+            s.type_id = Some(type_id);
+        };
+    }
+    fn check_struct_fields(&mut self, s: &mut AstStruct) {
         let struct_type_id = if let Some(type_id) = s.type_id {
             type_id
         } else {
-            let type_id = self.arena.intern_struct_symbol(s.struct_id);
-            s.type_id = Some(type_id);
-            type_id
+            unreachable!(
+                "Should have called check_struct_name which should have resolved this structs type id"
+            )
         };
 
         let new_fields: Vec<_> = s
             .fields
             .iter()
-            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2)))
+            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2, &self.symbols)))
             .collect();
 
         let struct_type = self.arena.kind_mut(struct_type_id);
-        if let TypeKind::Struct(TypeKindStruct { fields, .. }) = struct_type {
-            *fields = new_fields;
+        if let TypeKind::Struct(struct_id) = struct_type {
+            let struct_id = *struct_id;
+            self.arena.set_struct_fields(struct_id, new_fields);
         }
     }
     fn check_func(&mut self, f: &mut AstFunc) {
-        let return_type_id = self.arena.var_type_to_typeid(&f.return_type);
+        let return_type_id = self.arena.var_type_to_typeid(&f.return_type, &self.symbols);
 
         // allocate TypeIds for args
         let mut param_type_ids = vec![];
         let mut param_symbols = vec![];
         for arg in &mut f.args {
+            let type_id = self.arena.var_type_to_typeid(&arg.var_type, &self.symbols);
             let arg_symb = self.symbols.resolve_mut(arg.symbol_id);
             param_symbols.push(arg.symbol_id);
             if let SymbolKind::FnArg(data) = &mut arg_symb.kind {
-                data.type_id = Some(self.arena.var_type_to_typeid(&arg.var_type));
+                data.type_id = Some(type_id);
                 param_type_ids.push(data.type_id.unwrap());
             } else {
                 unreachable!()
@@ -529,7 +540,7 @@ impl<'a> TypeChecker<'a> {
                             .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
                         let expected_fields = match self.arena.kind(struct_type_id) {
-                            TypeKind::Struct (TypeKindStruct{ fields, .. }) => fields,
+                            TypeKind::Struct(struct_id) => self.arena.get_struct_fields(*struct_id),
                             _ => {
                                 self.errors.push(TypeCheckingError::Mismatch {
                                     type_a_str: "struct".to_string(),
@@ -573,7 +584,11 @@ impl<'a> TypeChecker<'a> {
 
                         // Extract struct_id and field definitions
                         let expected_fields = match self.arena.kind(struct_type_id) {
-                            TypeKind::Struct (TypeKindStruct{ fields, .. }) => fields.clone(),
+                            TypeKind::Struct(struct_id) =>
+                            // TODO: remove this clone
+                            {
+                                self.arena.get_struct_fields(*struct_id).clone()
+                            }
                             _ => {
                                 self.errors.push(TypeCheckingError::Mismatch {
                                     type_a_str: "struct".to_string(),

@@ -1,6 +1,7 @@
 use crate::{
     ast::Ast, cl_export::CLExporter, error::CompliationError, interner::SharedInterner,
-    lexer::Lexer, symbols::SymbolTable, type_checker::TypeChecker, types::TypeArena,
+    lexer::Lexer, struct_layout::StructLayoutInfo, symbols::SymbolTable, type_checker::TypeChecker,
+    types::TypeArena,
 };
 use std::{fs::read_to_string, process::Command};
 use target_lexicon::Triple;
@@ -11,10 +12,10 @@ pub mod error;
 pub mod hlir;
 pub mod interner;
 pub mod lexer;
+pub mod struct_layout;
 pub mod symbols;
 pub mod type_checker;
 pub mod types;
-pub mod struct_layout;
 
 #[derive(Debug)]
 pub struct ModParser {}
@@ -45,8 +46,10 @@ impl ModParser {
         if !type_checker.errors.is_empty() {
             return Err(CompliationError::TypeCheckingError(type_checker.errors));
         }
+        let struct_layouts = StructLayoutInfo::new(&type_arena).compute_struct_layout();
 
-        dbg!(&ast.fns[0]);
+        dbg!(&struct_layouts);
+        panic!();
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),
@@ -54,6 +57,7 @@ impl ModParser {
             &ast,
             &type_arena,
             &mut symbols,
+            struct_layouts,
         );
         cl_export.cl_compile().unwrap();
 

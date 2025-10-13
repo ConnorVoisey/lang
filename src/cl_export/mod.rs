@@ -8,6 +8,7 @@ use crate::{
     cl_export::cl_vals::{ClVals, CraneliftId},
     interner::SharedInterner,
     lexer::TokenKind,
+    struct_layout::StructLayout,
     symbols::{SymbolKind, SymbolTable},
     types::{TypeArena, TypeKind, TypeKindStruct},
 };
@@ -43,6 +44,7 @@ pub struct CLExporter<'a> {
     cl_vals: ClVals,
     func_defs_in_funcs: FxHashMap<FnInFn, FuncRef>,
     break_targets: Vec<Block>, // Stack of break targets for nested loops
+    struct_layouts: Vec<StructLayout>,
 }
 
 #[derive(Eq, Hash, PartialEq)]
@@ -59,6 +61,7 @@ impl<'a> CLExporter<'a> {
         ast: &'a Ast,
         types: &'a TypeArena,
         symbols: &'a mut SymbolTable,
+        struct_layouts: Vec<StructLayout>,
     ) -> Self {
         Self {
             interner,
@@ -70,6 +73,7 @@ impl<'a> CLExporter<'a> {
             func_defs_in_funcs: FxHashMap::default(),
             cl_vals: ClVals::default(),
             break_targets: Vec::new(),
+            struct_layouts,
         }
     }
 
@@ -734,10 +738,7 @@ impl ToClType for TypeKind {
             TypeKind::Str => todo!(),
             TypeKind::CStr => todo!(),
             TypeKind::Void => todo!(),
-            TypeKind::Struct(TypeKindStruct {
-                struct_id: _,
-                fields: _,
-            }) => todo!(),
+            TypeKind::Struct(_) => todo!(),
             TypeKind::Fn { .. } => todo!(),
             TypeKind::Ref(_) => types::I64,
             TypeKind::Unknown => todo!(),

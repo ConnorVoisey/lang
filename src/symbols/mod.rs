@@ -1,6 +1,9 @@
 use crate::{
     ast::{
-        ast_block::{AstBlock, AstStatement, StatementKind}, ast_expr::{AstExpr, Atom, ExprKind, Op}, ast_fn::AstFunc, Ast, VarType
+        Ast, VarType,
+        ast_block::{AstBlock, AstStatement, StatementKind},
+        ast_expr::{AstExpr, Atom, ExprKind, Op},
+        ast_fn::AstFunc,
     },
     cl_export::cl_vals::CraneliftId,
     interner::{IdentId, SharedInterner},
@@ -13,7 +16,7 @@ use rustc_hash::FxHashMap;
 pub mod error;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SymbolId(usize);
+pub struct SymbolId(pub usize);
 
 #[derive(Debug)]
 pub struct FnSymbolData {
@@ -161,13 +164,13 @@ impl SymbolTable {
                                 SymbolKind::Struct(data) => {
                                     types.intern_struct_symbol(data.struct_id)
                                 }
-                                _ => types.var_type_to_typeid(field_var_type),
+                                _ => types.var_type_to_typeid(field_var_type, &self),
                             }
                         }
-                        None => types.var_type_to_typeid(field_var_type),
+                        None => types.var_type_to_typeid(field_var_type, &self),
                     }
                 }
-                _ => types.var_type_to_typeid(field_var_type),
+                _ => types.var_type_to_typeid(field_var_type, &self),
             };
             field_type_ids.push(Some(field_type_id));
             fields_for_typekind.push((*field_ident_id, field_type_id));
@@ -177,9 +180,9 @@ impl SymbolTable {
         let struct_type_id = types.intern_struct_symbol(struct_id);
 
         // Update the struct's TypeKind with the computed field types
-        let struct_type = types.kind_mut(struct_type_id);
-        if let TypeKind::Struct (TypeKindStruct{ fields, .. }) = struct_type {
-            *fields = fields_for_typekind;
+        let struct_type = types.kind(struct_type_id);
+        if let TypeKind::Struct(struct_id) = struct_type {
+            types.set_struct_fields(*struct_id, fields_for_typekind);
         }
 
         struct_decl.type_id = Some(struct_type_id);
@@ -246,8 +249,8 @@ impl SymbolTable {
         let mut params = vec![];
         let mut param_symbols = vec![];
         for arg in &func.args {
+            let kind = arg.var_type.to_type_kind(types, &self);
             let symb = self.resolve_mut(arg.symbol_id);
-            let kind = arg.var_type.to_type_kind(types);
             let new_type_id = types.alloc(kind);
             match &mut symb.kind {
                 SymbolKind::FnArg(data) => {
@@ -378,10 +381,10 @@ impl SymbolTable {
 }
 
 trait ToTypeKind {
-    fn to_type_kind(&self, types: &mut TypeArena) -> TypeKind;
+    fn to_type_kind(&self, types: &mut TypeArena, symbols: &SymbolTable) -> TypeKind;
 }
 impl ToTypeKind for VarType {
-    fn to_type_kind(&self, types: &mut TypeArena) -> TypeKind {
+    fn to_type_kind(&self, types: &mut TypeArena, symbols: &SymbolTable) -> TypeKind {
         match &self {
             VarType::Void => todo!(),
             VarType::Int => TypeKind::Int,
@@ -391,7 +394,7 @@ impl ToTypeKind for VarType {
             VarType::CStr => TypeKind::CStr,
             VarType::CChar => todo!(),
             VarType::Custom(_) => todo!(),
-            VarType::Ref(var_type) => TypeKind::Ref(types.var_type_to_typeid(var_type)),
+            VarType::Ref(var_type) => TypeKind::Ref(types.var_type_to_typeid(var_type, symbols)),
         }
     }
 }
