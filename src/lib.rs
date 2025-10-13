@@ -37,7 +37,7 @@ impl ModParser {
         if !ast.errs.is_empty() {
             return Err(CompliationError::AstParseError(ast.errs));
         }
-        dbg!(&ast);
+        // dbg!(&ast);
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 
@@ -48,8 +48,6 @@ impl ModParser {
         }
         let struct_layouts = StructLayoutInfo::new(&type_arena).compute_struct_layout();
 
-        dbg!(&struct_layouts);
-        panic!();
         let mut cl_export = CLExporter::new(
             interner.clone(),
             Triple::host(),

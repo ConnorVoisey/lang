@@ -23,7 +23,7 @@ enum StructState {
     Visited,
 }
 
-pub fn topological_sort(structs: &[StructWithChild]) -> TopologicalSortResult {
+pub fn topological_sort_rev(structs: &[StructWithChild]) -> TopologicalSortResult {
     if structs.is_empty() {
         return TopologicalSortResult::Success(Vec::new());
     }
@@ -132,34 +132,30 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    // Helper function to create a test StructLayout with minimal boilerplate
-    fn make_struct(id: usize, children: &[usize]) -> StructLayout {
-        let mut child_struct_ids = FxHashSet::default();
+    // Helper function to create a test StructWithChild with minimal boilerplate
+    fn make_struct(id: usize, children: &[usize]) -> StructWithChild {
+        let mut child_ids = FxHashSet::default();
         for &child_id in children {
-            child_struct_ids.insert(StructId(child_id));
+            child_ids.insert(StructId(child_id));
         }
 
-        StructLayout {
+        StructWithChild {
             struct_id: StructId(id),
-            symbol_id: crate::symbols::SymbolId(id),
-            size: 0,
-            alignment: 1,
-            fields: vec![],
-            child_struct_ids,
+            child_ids,
         }
     }
 
     #[test]
     fn empty_graph() {
         let nodes = [];
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
         assert_eq!(result, TopologicalSortResult::Success(vec![]));
     }
 
     #[test]
     fn single_node() {
         let nodes = [make_struct(0, &[])];
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
         assert_eq!(result, TopologicalSortResult::Success(vec![StructId(0)]));
     }
 
@@ -172,7 +168,7 @@ mod tests {
             make_struct(2, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
         // All nodes should be in result, order doesn't matter for independent nodes
         match result {
             TopologicalSortResult::Success(sorted) => {
@@ -187,7 +183,8 @@ mod tests {
 
     #[test]
     fn linear_chain() {
-        // 0 -> 1 -> 2 -> 3
+        // 0 -> 1 -> 2 -> 3 (0 contains 1, 1 contains 2, etc.)
+        // For struct layout, we need to compute 3 first (no children), then 2, then 1, then 0
         let nodes = [
             make_struct(0, &[1]),
             make_struct(1, &[2]),
@@ -195,14 +192,14 @@ mod tests {
             make_struct(3, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
         assert_eq!(
             result,
             TopologicalSortResult::Success(vec![
-                StructId(0),
-                StructId(1),
+                StructId(3),
                 StructId(2),
-                StructId(3)
+                StructId(1),
+                StructId(0)
             ])
         );
     }
@@ -210,6 +207,7 @@ mod tests {
     #[test]
     fn diamond_pattern() {
         // Classic diamond: 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
+        // For struct layout: 3 must be computed before 1 and 2, which must be computed before 0
         let nodes = [
             make_struct(0, &[1, 2]),
             make_struct(1, &[3]),
@@ -217,25 +215,24 @@ mod tests {
             make_struct(3, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Success(sorted) => {
                 // Verify all nodes are present
                 assert_eq!(sorted.len(), 4);
 
-                // Verify topological ordering constraints
+                // Verify topological ordering constraints (children before parents)
                 let pos: std::collections::HashMap<_, _> =
                     sorted.iter().enumerate().map(|(i, &id)| (id, i)).collect();
 
-                // Node 0 must come before all others
-                assert!(pos[&StructId(0)] < pos[&StructId(1)]);
-                assert!(pos[&StructId(0)] < pos[&StructId(2)]);
-                assert!(pos[&StructId(0)] < pos[&StructId(3)]);
+                // Node 3 must come before 1 and 2 (children before parents)
+                assert!(pos[&StructId(3)] < pos[&StructId(1)]);
+                assert!(pos[&StructId(3)] < pos[&StructId(2)]);
 
-                // Node 1 and 2 must come before 3
-                assert!(pos[&StructId(1)] < pos[&StructId(3)]);
-                assert!(pos[&StructId(2)] < pos[&StructId(3)]);
+                // Nodes 1 and 2 must come before 0
+                assert!(pos[&StructId(1)] < pos[&StructId(0)]);
+                assert!(pos[&StructId(2)] < pos[&StructId(0)]);
             }
             _ => panic!("Expected success"),
         }
@@ -253,6 +250,7 @@ mod tests {
         //   3   4
         //    \ /
         //     5
+        // For struct layout: 5 first, then 3 and 4, then 1 and 2, then 0
         let nodes = [
             make_struct(0, &[1, 2]),
             make_struct(1, &[3, 4]),
@@ -262,30 +260,30 @@ mod tests {
             make_struct(5, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Success(sorted) => {
                 // Verify all nodes are present
                 assert_eq!(sorted.len(), 6);
 
-                // Verify topological ordering constraints
+                // Verify topological ordering constraints (children before parents)
                 let pos: std::collections::HashMap<_, _> =
                     sorted.iter().enumerate().map(|(i, &id)| (id, i)).collect();
 
-                // Node 0 must come before all others
-                assert!(pos[&StructId(0)] < pos[&StructId(1)]);
-                assert!(pos[&StructId(0)] < pos[&StructId(2)]);
+                // Node 5 must come before 3 and 4
+                assert!(pos[&StructId(5)] < pos[&StructId(3)]);
+                assert!(pos[&StructId(5)] < pos[&StructId(4)]);
 
-                // Node 1 and 2 must come before 3 and 4
-                assert!(pos[&StructId(1)] < pos[&StructId(3)]);
-                assert!(pos[&StructId(1)] < pos[&StructId(4)]);
-                assert!(pos[&StructId(2)] < pos[&StructId(3)]);
-                assert!(pos[&StructId(2)] < pos[&StructId(4)]);
+                // Nodes 3 and 4 must come before 1 and 2
+                assert!(pos[&StructId(3)] < pos[&StructId(1)]);
+                assert!(pos[&StructId(4)] < pos[&StructId(1)]);
+                assert!(pos[&StructId(3)] < pos[&StructId(2)]);
+                assert!(pos[&StructId(4)] < pos[&StructId(2)]);
 
-                // Nodes 3 and 4 must come before 5
-                assert!(pos[&StructId(3)] < pos[&StructId(5)]);
-                assert!(pos[&StructId(4)] < pos[&StructId(5)]);
+                // Nodes 1 and 2 must come before 0
+                assert!(pos[&StructId(1)] < pos[&StructId(0)]);
+                assert!(pos[&StructId(2)] < pos[&StructId(0)]);
             }
             _ => panic!("Expected success"),
         }
@@ -297,6 +295,7 @@ mod tests {
         //   0 -> 2
         //   1 -> 2
         //   2 -> 3
+        // For struct layout: 3 first, then 2, then 0 and 1
         let nodes = [
             make_struct(0, &[2]),
             make_struct(1, &[2]),
@@ -304,20 +303,20 @@ mod tests {
             make_struct(3, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Success(sorted) => {
                 // Verify all nodes are present
                 assert_eq!(sorted.len(), 4);
 
-                // Verify constraints
+                // Verify constraints (children before parents)
                 let pos: std::collections::HashMap<_, _> =
                     sorted.iter().enumerate().map(|(i, &id)| (id, i)).collect();
 
-                assert!(pos[&StructId(0)] < pos[&StructId(2)]);
-                assert!(pos[&StructId(1)] < pos[&StructId(2)]);
-                assert!(pos[&StructId(2)] < pos[&StructId(3)]);
+                assert!(pos[&StructId(3)] < pos[&StructId(2)]);
+                assert!(pos[&StructId(2)] < pos[&StructId(0)]);
+                assert!(pos[&StructId(2)] < pos[&StructId(1)]);
             }
             _ => panic!("Expected success"),
         }
@@ -332,7 +331,7 @@ mod tests {
             make_struct(2, &[0]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Cycle {
@@ -354,7 +353,7 @@ mod tests {
         // Node points to itself
         let nodes = [make_struct(0, &[0])];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Cycle {
@@ -381,7 +380,7 @@ mod tests {
             make_struct(4, &[2]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Cycle {
@@ -408,6 +407,7 @@ mod tests {
         // Test case where nodes reference earlier nodes but no cycles
         // 0 -> 1 -> 3
         // 0 -> 2 -> 3
+        // For struct layout: 3 first, then 1 and 2, then 0
         let nodes = [
             make_struct(0, &[1, 2]),
             make_struct(1, &[3]),
@@ -415,16 +415,16 @@ mod tests {
             make_struct(3, &[]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
         match result {
             TopologicalSortResult::Success(sorted) => {
                 assert_eq!(sorted.len(), 4);
                 let pos: std::collections::HashMap<_, _> =
                     sorted.iter().enumerate().map(|(i, &id)| (id, i)).collect();
-                assert!(pos[&StructId(0)] < pos[&StructId(1)]);
-                assert!(pos[&StructId(0)] < pos[&StructId(2)]);
-                assert!(pos[&StructId(1)] < pos[&StructId(3)]);
-                assert!(pos[&StructId(2)] < pos[&StructId(3)]);
+                assert!(pos[&StructId(3)] < pos[&StructId(1)]);
+                assert!(pos[&StructId(3)] < pos[&StructId(2)]);
+                assert!(pos[&StructId(1)] < pos[&StructId(0)]);
+                assert!(pos[&StructId(2)] < pos[&StructId(0)]);
             }
             _ => panic!("Expected success"),
         }
@@ -445,7 +445,7 @@ mod tests {
             make_struct(4, &[1]),
         ];
 
-        let result = topological_sort(&nodes);
+        let result = topological_sort_rev(&nodes);
 
         match result {
             TopologicalSortResult::Cycle {

@@ -1,7 +1,7 @@
 use crate::{
     interner::IdentId,
-    struct_layout::dfs::{StructWithChild, TopologicalSortResult, topological_sort},
-    types::{StructId, TypeArena, TypeId, TypeKind, TypeKindStruct},
+    struct_layout::dfs::{StructWithChild, TopologicalSortResult, topological_sort_rev},
+    types::{StructId, TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashSet;
 
@@ -58,7 +58,7 @@ impl<'a> StructLayoutInfo<'a> {
                 child_ids,
             });
         }
-        let top_sort_res = topological_sort(&structs_with_child);
+        let top_sort_res = topological_sort_rev(&structs_with_child);
 
         let sorted_struct_ids = match top_sort_res {
             TopologicalSortResult::Success(struct_ids) => struct_ids,
