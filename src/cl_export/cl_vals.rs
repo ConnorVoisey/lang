@@ -1,4 +1,5 @@
 use cranelift::prelude::Block;
+use cranelift_codegen::ir::StackSlot;
 use cranelift_frontend::Variable;
 use cranelift_module::FuncId;
 
@@ -7,6 +8,7 @@ pub enum CraneliftId {
     FnId(ClFnId),
     FnParamId(ClFnParamId),
     VarId(ClVarId),
+    StackSlotId(ClStackSlotId),
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq)]
@@ -18,11 +20,15 @@ pub struct ClFnParamId(usize);
 #[derive(Clone, Copy, Debug, Hash, PartialEq)]
 pub struct ClVarId(usize);
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+pub struct ClStackSlotId(usize);
+
 #[derive(Debug, Default)]
 pub struct ClVals {
     fns: Vec<FuncId>,
     fn_params: Vec<(Block, usize)>,
     vars: Vec<Variable>,
+    stack_slots: Vec<StackSlot>,
 }
 
 impl ClVals {
@@ -51,5 +57,14 @@ impl ClVals {
     }
     pub fn get_var(&self, cl_var_id: ClVarId) -> &Variable {
         &self.vars[cl_var_id.0]
+    }
+
+    pub fn insert_stack_slot(&mut self, slot: StackSlot) -> ClStackSlotId {
+        let id = self.stack_slots.len();
+        self.stack_slots.push(slot);
+        ClStackSlotId(id)
+    }
+    pub fn get_stack_slot(&self, cl_stack_slot_id: ClStackSlotId) -> &StackSlot {
+        &self.stack_slots[cl_stack_slot_id.0]
     }
 }

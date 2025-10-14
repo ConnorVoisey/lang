@@ -4,12 +4,13 @@ use crate::{
         ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
+        ast_struct::AstStruct,
     },
     cl_export::cl_vals::CraneliftId,
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
-    types::{StructId, TypeArena, TypeId, TypeKind, TypeKindStruct},
+    types::{StructId, TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
 
@@ -141,7 +142,7 @@ impl SymbolTable {
     pub fn register_struct(
         &mut self,
         types: &mut TypeArena,
-        struct_decl: &mut crate::ast::ast_struct::AstStruct,
+        struct_decl: &mut AstStruct,
         _errors: &mut Vec<SymbolError>,
     ) {
         let sym_id = struct_decl.symbol_id;
@@ -194,7 +195,7 @@ impl SymbolTable {
         &mut self,
         types: &mut TypeArena,
         func: &mut AstFunc,
-        errors: &mut Vec<SymbolError>,
+        _errors: &mut Vec<SymbolError>,
     ) {
         // We will not hold a long-lived mutable borrow to `self` while we call lookup/resolve.
         // First, ensure the symbol exists and is a function (immutable borrow).
@@ -369,8 +370,13 @@ impl SymbolTable {
                         }
                     }
                 }
-                Op::StructCreate { ident, args } => {
+                Op::StructCreate {
+                    ident,
+                    args,
+                    symbol_id: _,
+                } => {
                     self.register_expr(ident);
+                    // TODO: might need to set the symbol_id here
                     for (_, expr) in args.iter_mut() {
                         self.register_expr(expr);
                     }

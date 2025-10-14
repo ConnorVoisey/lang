@@ -147,7 +147,6 @@ impl Ast {
     }
 
     fn parse_var_type(&mut self) -> (VarType, crate::lexer::Span) {
-        let start_i = self.curr_token_i();
         match self.next_token() {
             Some(Token {
                 kind: TokenKind::Amp,

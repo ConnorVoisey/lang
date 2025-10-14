@@ -1,5 +1,3 @@
-use rustc_hash::FxHashMap;
-
 use crate::{
     hlir::{
         BinaryOp, Block, BlockId, FuncMetadata, Function, Instr, InstrId, LocalSlot, SpanId,
@@ -9,12 +7,13 @@ use crate::{
     symbols::SymbolId,
     types::{TypeArena, TypeId},
 };
+use rustc_hash::FxHashMap;
 
 pub struct FunctionBuilder<'a> {
-    func: Function,
-    current_block: Option<BlockId>,
-    type_arena: &'a TypeArena,
-    interner: SharedInterner,
+    pub func: Function,
+    pub current_block: Option<BlockId>,
+    pub type_arena: &'a TypeArena,
+    pub interner: SharedInterner,
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -123,7 +122,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn emit_local(&mut self) -> ValueId {
-        let id = self.func.locals.len();
+        let _id = self.func.locals.len();
         self.func.locals.push(LocalSlot {
             name: todo!(),
             ty: todo!(),

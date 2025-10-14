@@ -10,7 +10,7 @@ use crate::{
     lexer::TokenKind,
     struct_layout::StructLayout,
     symbols::{SymbolKind, SymbolTable},
-    types::{TypeArena, TypeKind, TypeKindStruct},
+    types::{TypeArena, TypeKind},
 };
 use cranelift::{
     codegen::{
@@ -105,7 +105,7 @@ impl<'a> CLExporter<'a> {
             let interner_reader = self.interner.read();
             let fn_name = interner_reader.resolve(extern_fn.ident_id);
             let cl_func = self
-                .parse_extern_fn(&mut obj_module, &extern_fn, fn_name)
+                .parse_extern_fn(&mut obj_module, extern_fn, fn_name)
                 .expect("Failed to build extern fn into cl func id");
             let symb = self.symbols.resolve_mut(extern_fn.symbol_id);
             symb.cranelift_id = Some(CraneliftId::FnId(self.cl_vals.insert_fn(cl_func)));
@@ -281,24 +281,49 @@ impl<'a> CLExporter<'a> {
                         let type_id = data.type_id;
                         let ty = self.types.kind(type_id.unwrap());
                         let cl_var = match ty {
-                            TypeKind::Int => fn_builder.declare_var(types::I32),
+                            TypeKind::Int => {
+                                let cl_var = fn_builder.declare_var(types::I32);
+                                CraneliftId::VarId(self.cl_vals.insert_var(cl_var))
+                            }
                             TypeKind::Uint => todo!(),
                             TypeKind::Str => todo!(),
                             TypeKind::CStr => todo!(),
                             TypeKind::Ref(_) => todo!(),
                             TypeKind::Unknown => todo!(),
                             TypeKind::Var => todo!(),
+                            TypeKind::Struct(struct_id) => {
+                                let layout = &self.struct_layouts[struct_id.0];
+                                // TODO: reserve this amount of span in the current stack;
+                                let slot = fn_builder.create_sized_stack_slot(StackSlotData {
+                                    kind: StackSlotKind::ExplicitSlot,
+                                    size: layout.size as u32,
+                                    align_shift: layout.alignment as u8,
+                                });
+                                let slot_id = self.cl_vals.insert_stack_slot(slot);
+                                CraneliftId::StackSlotId(slot_id)
+                            }
                             t => {
                                 dbg!(t);
                                 todo!();
                             }
                         };
-                        symb.cranelift_id =
-                            Some(CraneliftId::VarId(self.cl_vals.insert_var(cl_var)));
+                        symb.cranelift_id = Some(cl_var);
                         let cl_val = self
                             .expr_to_cl(fid, expr, fn_builder, obj_module, call_conv)?
                             .unwrap();
-                        fn_builder.def_var(cl_var, cl_val);
+                        match cl_var {
+                            CraneliftId::VarId(cl_var_id) => {
+                                fn_builder.def_var(*self.cl_vals.get_var(cl_var_id), cl_val);
+                            }
+                            CraneliftId::StackSlotId(cl_stack_slot_id) => {
+                                fn_builder.ins().stack_store(
+                                    cl_val,
+                                    *self.cl_vals.get_stack_slot(cl_stack_slot_id),
+                                    0,
+                                );
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                     _ => todo!(),
                 };
@@ -390,9 +415,24 @@ impl<'a> CLExporter<'a> {
     ) -> color_eyre::Result<Option<Value>> {
         let val = match &expr.kind {
             ExprKind::Atom(atom) => match atom {
-                Atom::Ident((_, symbol_id)) => {
+                Atom::Ident((ident_id, symbol_id)) => {
                     let symb = self.symbols.resolve_mut(symbol_id.unwrap());
                     match symb.cranelift_id.unwrap() {
+                        CraneliftId::StackSlotId(stack_slot_id) => {
+                            let struct_symbol_data = match &symb.kind {
+                                SymbolKind::Struct(struct_symbol_data) => struct_symbol_data,
+                                _ => unreachable!(),
+                            };
+                            let struct_layout =
+                                &self.struct_layouts[struct_symbol_data.struct_id.0];
+                            let field = struct_layout.fields.iter().find(|f| f.ident_id == *ident_id).expect("Cannot find an ident with this id in cl_export, this should have been caught much earlier");
+
+                            Some(fn_builder.ins().stack_load(
+                                self.types.kind(field.type_id).to_cl_type(),
+                                *self.cl_vals.get_stack_slot(stack_slot_id),
+                                field.offset as i32,
+                            ))
+                        }
                         CraneliftId::VarId(cl_var_id) => {
                             Some(fn_builder.use_var(*self.cl_vals.get_var(cl_var_id)))
                         }
@@ -691,6 +731,59 @@ impl<'a> CLExporter<'a> {
                     fn_builder.ins().jump(curr_block, args.iter());
                     fn_builder.switch_to_block(curr_block);
                     val
+                }
+
+                Op::StructCreate {
+                    ident: _,
+                    symbol_id,
+                    args,
+                } => {
+                    let symbol_id = symbol_id.unwrap();
+
+                    let (struct_id, cl_stack_slot_id) = {
+                        let symbol = self.symbols.resolve(symbol_id);
+                        let struct_id = match &symbol.kind {
+                            SymbolKind::Struct(struct_symbol_data) => struct_symbol_data.struct_id,
+                            _ => unreachable!(),
+                        };
+                        let cranelift_id = symbol.cranelift_id.unwrap();
+                        let cl_stack_slot_id = match cranelift_id {
+                            CraneliftId::StackSlotId(id) => id,
+                            _ => unreachable!(),
+                        };
+                        (struct_id, cl_stack_slot_id)
+                    };
+
+                    let fields: Vec<_> = {
+                        let layout = &self.struct_layouts[struct_id.0];
+                        layout
+                            .fields
+                            .iter()
+                            .map(|f| (f.ident_id, f.offset))
+                            .collect()
+                    };
+                    let stack_slot = *self.cl_vals.get_stack_slot(cl_stack_slot_id);
+
+                    for (field_ident_id, field_offset) in fields {
+                        let expr = args
+                            .iter()
+                            .find_map(|(ident_id, expr)| {
+                                if *ident_id == field_ident_id {
+                                    Some(expr)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap();
+                        let cl_val = self
+                            .expr_to_cl(callee_func_id, expr, fn_builder, obj_module, call_conv)?
+                            .unwrap();
+
+                        fn_builder
+                            .ins()
+                            .stack_store(cl_val, stack_slot, field_offset as i32);
+                    }
+                    todo!()
                 }
 
                 t => {

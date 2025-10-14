@@ -38,41 +38,41 @@ pub struct Module<'a> {
 
 // Per-function SSA container (function-local memory)
 pub struct Function {
-    name: SymbolId,
-    params: Vec<(SymbolId, TypeId)>,
-    blocks: Vec<Block>,
-    instrs: Vec<Instr>,
-    values: Vec<ValueInfo>,
-    entry: BlockId,
-    locals: Vec<LocalSlot>,
-    metadata: FuncMetadata,
-    symbols: FxHashMap<SymbolId, ValueId>,
+    pub name: SymbolId,
+    pub params: Vec<(SymbolId, TypeId)>,
+    pub blocks: Vec<Block>,
+    pub instrs: Vec<Instr>,
+    pub values: Vec<ValueInfo>,
+    pub entry: BlockId,
+    pub locals: Vec<LocalSlot>,
+    pub metadata: FuncMetadata,
+    pub symbols: FxHashMap<SymbolId, ValueId>,
 }
 
 // Basic block
 pub struct Block {
-    id: BlockId,
-    params: Vec<ValueId>,
-    instr_begin: usize,
-    instr_end: usize,
-    successors: Vec<BlockId>,
-    predecessors: Vec<BlockId>,
-    span: SpanId,
+    pub id: BlockId,
+    pub params: Vec<ValueId>,
+    pub instr_begin: usize,
+    pub instr_end: usize,
+    pub successors: Vec<BlockId>,
+    pub predecessors: Vec<BlockId>,
+    pub span: SpanId,
 }
 
 // Value info: every computed value has a type and a defining InstrId
 pub struct ValueInfo {
-    id: ValueId,
-    ty: TypeId,
-    def: InstrId,
-    span: SpanId,
+    pub id: ValueId,
+    pub ty: TypeId,
+    pub def: InstrId,
+    pub span: SpanId,
 }
 
 // Local slots for stackified allocs, etc.
 pub struct LocalSlot {
-    name: IdentId,
-    ty: TypeId,
-    slot_index: u32, // used at lowering for frame layout
+    pub name: IdentId,
+    pub ty: TypeId,
+    pub slot_index: u32, // used at lowering for frame layout
 }
 
 pub enum Instr {
@@ -211,7 +211,7 @@ impl<'a> Module<'a> {
         }
     }
 
-    fn parse_expr(&self, fb: &mut FunctionBuilder<'_>, expr: &AstExpr) -> Option<ValueId> {
+    fn parse_expr(&self, _fb: &mut FunctionBuilder<'_>, expr: &AstExpr) -> Option<ValueId> {
         match &expr.kind {
             ExprKind::Atom(atom) => match atom {
                 Atom::Ident(_) => todo!(),
@@ -243,7 +243,11 @@ impl<'a> Module<'a> {
                     else_ifs: _,
                     unconditional_else: _,
                 } => todo!(),
-                Op::StructCreate { ident: _, args: _ } => todo!(),
+                Op::StructCreate {
+                    ident: _,
+                    args: _,
+                    symbol_id: _,
+                } => todo!(),
             },
         }
     }

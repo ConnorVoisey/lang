@@ -575,7 +575,11 @@ impl<'a> TypeChecker<'a> {
                     Op::Equivalent { left: _, right: _ } => todo!(),
                     Op::SquareOpen { left: _, args: _ } => todo!(),
                     Op::BracketOpen { left: _, right: _ } => todo!(),
-                    Op::StructCreate { ident, args } => {
+                    Op::StructCreate {
+                        ident,
+                        args,
+                        symbol_id: _,
+                    } => {
                         // Type check the struct identifier expression
                         let struct_type_id = self
                             .check_expr(ident, return_type_id, fn_symbol_id, inside_loop)

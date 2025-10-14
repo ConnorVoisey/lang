@@ -89,6 +89,7 @@ pub enum Op {
     },
     StructCreate {
         ident: AstExpr,
+        symbol_id: Option<SymbolId>,
         args: Vec<(IdentId, AstExpr)>,
     },
 }
@@ -490,7 +491,11 @@ impl Ast {
                                 start: self.tokens[start_token_at].span.start,
                                 end: self.tokens[self.curr_token_i()].span.end,
                             },
-                            kind: ExprKind::Op(Box::new(Op::StructCreate { ident: lhs?, args })),
+                            kind: ExprKind::Op(Box::new(Op::StructCreate {
+                                ident: lhs?,
+                                symbol_id: None,
+                                args,
+                            })),
                             type_id: None,
                         })
                     }
@@ -724,7 +729,11 @@ impl Ast {
                     right: self.expr_to_debug(right),
                 },
                 Op::IfCond { .. } => todo!(),
-                Op::StructCreate { ident, args } => DebugOp::StructCreate {
+                Op::StructCreate {
+                    ident,
+                    args,
+                    symbol_id: _,
+                } => DebugOp::StructCreate {
                     ident: self.expr_to_debug(ident),
                     args: args
                         .iter()
