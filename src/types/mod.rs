@@ -265,19 +265,18 @@ impl TypeArena {
     }
     pub fn kind_to_string(&self, kind: &TypeKind) -> String {
         match kind {
-            TypeKind::Int => "Int",
-            TypeKind::Uint => "Uint",
-            TypeKind::Str => "Str",
-            TypeKind::CStr => "CStr",
-            TypeKind::Void => "Void",
-            TypeKind::Bool => "Bool",
-            TypeKind::Struct { .. } => "Struct",
-            TypeKind::Fn { .. } => "Fn",
-            TypeKind::Ref(_) => "Ref",
-            TypeKind::Unknown => "Unknown",
-            TypeKind::Var => "Var",
+            TypeKind::Int => "Int".to_string(),
+            TypeKind::Uint => "Uint".to_string(),
+            TypeKind::Str => "Str".to_string(),
+            TypeKind::CStr => "CStr".to_string(),
+            TypeKind::Void => "Void".to_string(),
+            TypeKind::Bool => "Bool".to_string(),
+            TypeKind::Struct(struct_id) => format!("Struct {}", struct_id.0),
+            TypeKind::Fn { .. } => "Fn".to_string(),
+            TypeKind::Ref(type_id) => format!("&{}", self.kind_to_string(self.kind(*type_id))),
+            TypeKind::Unknown => "Unknown".to_string(),
+            TypeKind::Var => "Var".to_string(),
         }
-        .to_string()
     }
 
     pub fn id_to_string(&self, type_id: TypeId) -> String {

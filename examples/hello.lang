@@ -3,28 +3,20 @@ import {
 
 extern "C" {
     fn printf(str &CStr, val Int) Int;
+    fn print_foo(foo &Foo) Int;
 }
 
 struct Foo {
     num Int,
-}
-
-struct Bar {
-    foo Foo,
-    baz &Baz,
-}
-
-struct Baz {
-    bar Bar,
-    foo Foo,
+    y Int,
 }
 
 fn main() Int {
     let foo = Foo {
         num: 20,
+        y: 55,
     };
 
-    printf(&c"%d
-", foo.num);
+    print_foo(&foo);
     0
 }

@@ -66,7 +66,7 @@ impl<'a> TypeChecker<'a> {
         let new_fields: Vec<_> = s
             .fields
             .iter()
-            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2, &self.symbols)))
+            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2, self.symbols)))
             .collect();
 
         let struct_type = self.arena.kind_mut(struct_type_id);
@@ -76,13 +76,13 @@ impl<'a> TypeChecker<'a> {
         }
     }
     fn check_func(&mut self, f: &mut AstFunc) {
-        let return_type_id = self.arena.var_type_to_typeid(&f.return_type, &self.symbols);
+        let return_type_id = self.arena.var_type_to_typeid(&f.return_type, self.symbols);
 
         // allocate TypeIds for args
         let mut param_type_ids = vec![];
         let mut param_symbols = vec![];
         for arg in &mut f.args {
-            let type_id = self.arena.var_type_to_typeid(&arg.var_type, &self.symbols);
+            let type_id = self.arena.var_type_to_typeid(&arg.var_type, self.symbols);
             let arg_symb = self.symbols.resolve_mut(arg.symbol_id);
             param_symbols.push(arg.symbol_id);
             if let SymbolKind::FnArg(data) = &mut arg_symb.kind {

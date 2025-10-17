@@ -139,6 +139,27 @@ impl SymbolTable {
         errs
     }
 
+    /// Recursively resolves symbol IDs in a VarType
+    /// This is needed before converting VarType to TypeKind
+    fn resolve_var_type_symbols(&mut self, var_type: &mut VarType) {
+        match var_type {
+            VarType::Custom((ident_id, symbol_id_opt)) => {
+                *symbol_id_opt = self.lookup(*ident_id);
+            }
+            VarType::Ref(inner) => {
+                self.resolve_var_type_symbols(inner);
+            }
+            // Primitive types don't need resolution
+            VarType::Void
+            | VarType::Int
+            | VarType::Bool
+            | VarType::Uint
+            | VarType::Str
+            | VarType::CStr
+            | VarType::CChar => {}
+        }
+    }
+
     pub fn register_struct(
         &mut self,
         types: &mut TypeArena,
@@ -165,13 +186,13 @@ impl SymbolTable {
                                 SymbolKind::Struct(data) => {
                                     types.intern_struct_symbol(data.struct_id)
                                 }
-                                _ => types.var_type_to_typeid(field_var_type, &self),
+                                _ => types.var_type_to_typeid(field_var_type, self),
                             }
                         }
-                        None => types.var_type_to_typeid(field_var_type, &self),
+                        None => types.var_type_to_typeid(field_var_type, self),
                     }
                 }
-                _ => types.var_type_to_typeid(field_var_type, &self),
+                _ => types.var_type_to_typeid(field_var_type, self),
             };
             field_type_ids.push(Some(field_type_id));
             fields_for_typekind.push((*field_ident_id, field_type_id));
@@ -249,7 +270,9 @@ impl SymbolTable {
         // allocte fn params
         let mut params = vec![];
         let mut param_symbols = vec![];
-        for arg in &func.args {
+        for arg in &mut func.args {
+            // Resolve symbol IDs in the VarType before converting to TypeKind
+            self.resolve_var_type_symbols(&mut arg.var_type);
             let kind = arg.var_type.to_type_kind(types, &self);
             let symb = self.resolve_mut(arg.symbol_id);
             let new_type_id = types.alloc(kind);
