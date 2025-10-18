@@ -2,21 +2,21 @@ import {
 }
 
 extern "C" {
-    fn printf(str &CStr, val Int) Int;
-    fn print_foo(foo &Foo) Int;
+    fn printf(str &CStr, param_1 Int, param_2 Int) Int;
 }
 
 struct Foo {
-    num Int,
+    x Int,
     y Int,
 }
 
 fn main() Int {
     let foo = Foo {
-        num: 20,
-        y: 55,
+        x: 5,
+        y: 22,
     };
 
-    print_foo(&foo);
+    printf(&c"Foo { x: %d, y: %d }
+", foo.x, foo.y);
     0
 }

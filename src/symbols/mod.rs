@@ -88,7 +88,7 @@ impl SymbolTable {
         self.scopes.pop().expect("No scopes to remove");
     }
 
-    pub fn lookup(&mut self, ident_id: IdentId) -> Option<SymbolId> {
+    pub fn lookup(&self, ident_id: IdentId) -> Option<SymbolId> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol_id) = scope.get(&ident_id) {
                 return Some(*symbol_id);

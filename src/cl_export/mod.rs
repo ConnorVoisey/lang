@@ -759,8 +759,21 @@ impl<'a> CLExporter<'a> {
                                 }
                             }
                         }
+                        ExprKind::Atom(Atom::CStr(_)) => {
+                            let ref_cl_val = self
+                                .expr_to_cl(
+                                    callee_func_id,
+                                    ref_expr,
+                                    fn_builder,
+                                    obj_module,
+                                    call_conv,
+                                    stack_layout,
+                                )?
+                                .unwrap();
+
+                            Some(ref_cl_val)
+                        }
                         _ => {
-                            // For other expressions, we'd need to evaluate and spill to stack
                             todo!("Taking reference to complex expressions not yet implemented")
                         }
                     }
@@ -938,12 +951,53 @@ impl<'a> CLExporter<'a> {
                     Some(fn_builder.ins().stack_addr(types::I64, stack_slot.0, 0))
                 }
 
-                Op::Dot { left, right } => {
-                    // TODO: get the left symbol somehow, then work out what the right expression
-                    // is in relation to it. This might need restructuring since it doens't really
-                    // make much sense and there are lots of invalid representations.
-                    todo!()
-                }
+                Op::Dot { left, right } => match &left.kind {
+                    ExprKind::Atom(Atom::Ident((_, Some(symbol_id)))) => {
+                        let symb = self.symbols.resolve(*symbol_id);
+                        match &symb.kind {
+                            SymbolKind::Var(var_symbol_data) => {
+                                let var_type_id =
+                                    var_symbol_data.type_id.expect("var missing type");
+                                let struct_id = match self.types.kind(var_type_id) {
+                                    TypeKind::Struct(sid) => *sid,
+                                    _ => panic!("dot operation on non-struct"),
+                                };
+
+                                let stack_slot_id = match symb.cranelift_id.unwrap() {
+                                    CraneliftId::StackSlotId(id) => id,
+                                    _ => todo!("handle non-stack-allocated vars"),
+                                };
+
+                                let struct_layout = &self.struct_layouts[struct_id.0];
+                                let stack_slot = self.cl_vals.get_stack_slot(stack_slot_id);
+                                let struct_field = match &right.kind {
+                                    ExprKind::Atom(Atom::Ident((ident_id, _))) => {
+                                        struct_layout.fields.iter().find(|f| f.ident_id == *ident_id)
+                                            .expect("Failed to find struct field with the ident id, this should have been caught in type checking")
+                                    }
+                                    t => {
+                                        dbg!(t);
+                                        todo!("handled dot op where right is not an ident");
+                                    }
+                                };
+
+                                Some(fn_builder.ins().stack_load(
+                                    self.types.kind(struct_field.type_id).to_cl_type(),
+                                    *stack_slot,
+                                    struct_field.offset as i32,
+                                ))
+                            }
+                            t => {
+                                dbg!(t);
+                                todo!("handled dot op where left symbol is not var or struct");
+                            }
+                        }
+                    }
+                    t => {
+                        dbg!(t);
+                        todo!("handled dot op where left is not an ident");
+                    }
+                },
 
                 t => {
                     dbg!(t);
