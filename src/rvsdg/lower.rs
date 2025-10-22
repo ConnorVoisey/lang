@@ -426,7 +426,7 @@ impl<'a> AstLowering<'a> {
                 self.lower_expr(builder, operand)
             }
 
-            Op::SquareOpen { .. } | Op::BracketOpen { .. } => {
+            Op::ArrayAccess { .. } | Op::ArrayInit { .. } | Op::BracketOpen { .. } => {
                 // TODO: Handle these operations
                 None
             }

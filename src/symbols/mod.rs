@@ -265,7 +265,7 @@ impl SymbolTable {
         };
 
         // allocate the type for the return type
-        let return_t = types.alloc(type_kind);
+        let return_t = types.make(type_kind);
 
         // allocte fn params
         let mut params = vec![];
@@ -275,7 +275,7 @@ impl SymbolTable {
             self.resolve_var_type_symbols(&mut arg.var_type);
             let kind = arg.var_type.to_type_kind(types, &self);
             let symb = self.resolve_mut(arg.symbol_id);
-            let new_type_id = types.alloc(kind);
+            let new_type_id = types.make(kind);
             match &mut symb.kind {
                 SymbolKind::FnArg(data) => {
                     data.type_id = Some(new_type_id);
@@ -286,7 +286,7 @@ impl SymbolTable {
             param_symbols.push(arg.symbol_id);
         }
 
-        let fn_t = types.alloc(TypeKind::Fn {
+        let fn_t = types.make(TypeKind::Fn {
             params,
             param_symbols,
             ret: return_t,
@@ -367,8 +367,11 @@ impl SymbolTable {
                 Op::Block(block) => {
                     self.register_block(block);
                 }
-                Op::SquareOpen { left, args } => {
+                Op::ArrayAccess { left, args } => {
                     self.register_expr(left);
+                    args.iter_mut().for_each(|expr| self.register_expr(expr));
+                }
+                Op::ArrayInit { args } => {
                     args.iter_mut().for_each(|expr| self.register_expr(expr));
                 }
                 Op::IfCond {

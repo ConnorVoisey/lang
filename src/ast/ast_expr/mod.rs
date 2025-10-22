@@ -6,6 +6,7 @@ use crate::{
     types::TypeId,
 };
 
+pub mod array;
 pub mod error;
 pub mod if_expr;
 
@@ -73,7 +74,10 @@ pub enum Op {
         left: AstExpr,
         right: AstExpr,
     },
-    SquareOpen {
+    ArrayInit {
+        args: Vec<AstExpr>,
+    },
+    ArrayAccess {
         left: AstExpr,
         args: Vec<AstExpr>,
     },
@@ -149,6 +153,9 @@ impl Ast {
                     }
                 }
                 lhs
+            }
+            TokenKind::SquareBracketOpen => {
+                self.parse_array_expr(min_bp, symbols, is_direct_if_cond)
             }
 
             TokenKind::Subtract => {
@@ -285,6 +292,7 @@ impl Ast {
                     TokenKind::BracketClose => break,
                     TokenKind::CurlyBracketClose => break,
                     TokenKind::SemiColon => break,
+                    TokenKind::Comma => break,
                     _ => {
                         self.errs
                             .push(AstParseError::ExpectedOperator { token: v.clone() });
@@ -357,7 +365,7 @@ impl Ast {
                                 start: self.tokens[start_token_at].span.start,
                                 end: self.tokens[self.curr_token_i()].span.end,
                             },
-                            kind: ExprKind::Op(Box::new(Op::SquareOpen { left: lhs?, args })),
+                            kind: ExprKind::Op(Box::new(Op::ArrayAccess { left: lhs?, args })),
                             type_id: None,
                         })
                     }
@@ -733,8 +741,11 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
-                Op::SquareOpen { left, args } => DebugOp::SquareOpen {
+                Op::ArrayAccess { left, args } => DebugOp::ArrayAccess {
                     left: self.expr_to_debug(left),
+                    args: args.iter().map(|arg| self.expr_to_debug(arg)).collect(),
+                },
+                Op::ArrayInit { args } => DebugOp::ArrayInit {
                     args: args.iter().map(|arg| self.expr_to_debug(arg)).collect(),
                 },
                 Op::BracketOpen { left, right } => DebugOp::BracketOpen {
@@ -825,8 +836,11 @@ pub enum DebugOp {
         left: DebugExprKind,
         right: DebugExprKind,
     },
-    SquareOpen {
+    ArrayAccess {
         left: DebugExprKind,
+        args: Vec<DebugExprKind>,
+    },
+    ArrayInit {
         args: Vec<DebugExprKind>,
     },
     BracketOpen {
@@ -904,7 +918,7 @@ mod test {
     #[test]
     fn squared_brackets() {
         let debug_expr = parse_debug("foo[5 - 1];");
-        let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
+        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
             args: vec![DebugExprKind::Op(Box::new(DebugOp::Minus {
                 left: DebugExprKind::Atom(DebugAtom::Int(5)),
@@ -917,9 +931,9 @@ mod test {
     #[test]
     fn multi_squared_brackets() {
         let debug_expr = parse_debug("foo[5 - 1][2][bar];");
-        let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
-            left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
-                left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
+        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+            left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+                left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                     left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
                     args: vec![DebugExprKind::Op(Box::new(DebugOp::Minus {
                         left: DebugExprKind::Atom(DebugAtom::Int(5)),
@@ -936,8 +950,8 @@ mod test {
     #[test]
     fn multi_array() {
         let debug_expr = parse_debug("foo[5 - 1, 2, 12390][2];");
-        let expected = DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
-            left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
+        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+            left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
                 args: vec![
                     DebugExprKind::Op(Box::new(DebugOp::Minus {
@@ -1057,7 +1071,7 @@ mod test {
     fn mixed_call_index_dot() {
         let debug_expr = parse_debug("foo(bar)[baz].qux;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Dot {
-            left: DebugExprKind::Op(Box::new(DebugOp::SquareOpen {
+            left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
                     ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
                     args: vec![DebugExprKind::Atom(DebugAtom::Ident("bar".to_string()))],

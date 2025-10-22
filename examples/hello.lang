@@ -8,6 +8,7 @@ extern "C" {
 fn main() Int {
     let foo = 5;
     let bar = 10;
+    let arr = [4, 6, 12];
 
     if foo < 20 {
         foo = bar + foo;

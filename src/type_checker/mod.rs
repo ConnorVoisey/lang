@@ -92,7 +92,7 @@ impl<'a> TypeChecker<'a> {
                 unreachable!()
             }
         }
-        let fn_type = self.arena.alloc(TypeKind::Fn {
+        let fn_type = self.arena.make(TypeKind::Fn {
             params: param_type_ids,
             ret: return_type_id,
             param_symbols,
@@ -348,7 +348,7 @@ impl<'a> TypeChecker<'a> {
                         let inner_t = self
                             .check_expr(inner, return_type_id, fn_symbol_id, inside_loop)
                             .unwrap();
-                        let ref_t = self.arena.alloc(TypeKind::Ref(inner_t));
+                        let ref_t = self.arena.make(TypeKind::Ref(inner_t));
                         expr.type_id = Some(ref_t);
                         expr.type_id
                     }
@@ -573,7 +573,36 @@ impl<'a> TypeChecker<'a> {
                     }
 
                     Op::Equivalent { left: _, right: _ } => todo!(),
-                    Op::SquareOpen { left: _, args: _ } => todo!(),
+                    Op::ArrayAccess { left: _, args: _ } => todo!(),
+                    Op::ArrayInit { args } => {
+                        // all elements within the array init must have the same type
+                        let mut type_id = None;
+                        for arg in args.iter_mut() {
+                            let arg_type_id =
+                                self.check_expr(arg, return_type_id, fn_symbol_id, inside_loop);
+                            if let Some(new_type_id) = arg_type_id {
+                                match type_id {
+                                    Some(type_id) => {
+                                        if self.arena.unify(new_type_id, type_id).is_err() {
+                                            self.errors.push(TypeCheckingError::Mismatch {
+                                                type_a_str: self.arena.id_to_string(new_type_id),
+                                                type_a_span: arg.span.clone(),
+                                                type_b_str: self.arena.id_to_string(type_id),
+                                                type_b_span: arg.span.clone(),
+                                            });
+                                        }
+                                    }
+                                    None => type_id = arg_type_id,
+                                }
+                            }
+                        }
+                        let size = args.len();
+                        expr.type_id = Some(self.arena.make(TypeKind::Array {
+                            size,
+                            inner_type: Box::new(self.arena.kind(type_id.unwrap()).clone()),
+                        }));
+                        expr.type_id
+                    }
                     Op::BracketOpen { left: _, right: _ } => todo!(),
                     Op::StructCreate {
                         ident,

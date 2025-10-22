@@ -139,6 +139,7 @@ impl<'a> StructLayoutInfo<'a> {
             TypeKind::Var => {
                 panic!("Cannot compute size of Var type - should be resolved by type checker")
             }
+            TypeKind::Array { .. } => todo!("implement struct sizing rules for array fields"),
         }
     }
 

@@ -1072,6 +1072,7 @@ impl ToClType for TypeKind {
             TypeKind::Ref(_) => types::I64,
             TypeKind::Unknown => todo!(),
             TypeKind::Var => todo!(),
+            TypeKind::Array { .. } => todo!(),
         }
     }
 }

@@ -10,7 +10,7 @@ pub struct TypeId(pub usize);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StructId(pub usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
     Int,
     Uint,
@@ -19,6 +19,10 @@ pub enum TypeKind {
     Void,
     Bool,
     Struct(StructId),
+    Array {
+        size: usize,
+        inner_type: Box<TypeKind>,
+    },
     Fn {
         params: Vec<TypeId>,
         param_symbols: Vec<SymbolId>,
@@ -86,16 +90,12 @@ impl TypeArena {
         arena
     }
 
-    fn make(&mut self, kind: TypeKind) -> TypeId {
+    pub fn make(&mut self, kind: TypeKind) -> TypeId {
         let id = TypeId(self.kinds.len());
         self.kinds.push(kind);
         self.parent.push(id); // initially parent is itself
         self.rank.push(0);
         id
-    }
-
-    pub fn alloc(&mut self, kind: TypeKind) -> TypeId {
-        self.make(kind)
     }
 
     pub fn alloc_var(&mut self) -> TypeId {
@@ -209,6 +209,27 @@ impl TypeArena {
                 self.union(ra, rb);
                 Ok(())
             }
+            (
+                TypeKind::Array {
+                    inner_type: inner_type_1,
+                    size: size_1,
+                },
+                TypeKind::Array {
+                    inner_type: inner_type_2,
+                    size: size_2,
+                },
+            ) => {
+                if *inner_type_1 != *inner_type_2 || size_1 != size_2 {
+                    return Err(UnifyErrorWithoutSpan::Mismatch(
+                        ra,
+                        self.kinds[ra.0].clone(),
+                        rb,
+                        self.kinds[rb.0].clone(),
+                    ));
+                }
+                self.union(ra, rb);
+                Ok(())
+            }
             (ka, kb) => Err(UnifyErrorWithoutSpan::Mismatch(ra, ka, rb, kb)),
         }
     }
@@ -225,22 +246,22 @@ impl TypeArena {
         }
 
         // Create new TypeId for this struct
-        let type_id = self.alloc(TypeKind::Struct(struct_id));
+        let type_id = self.make(TypeKind::Struct(struct_id));
         self.struct_symbol_to_type[struct_id.0] = Some(type_id);
         type_id
     }
 
     pub fn var_type_to_typeid(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeId {
         match v {
-            VarType::Void => self.alloc(TypeKind::Void),
-            VarType::Int => self.alloc(TypeKind::Int),
-            VarType::Uint => self.alloc(TypeKind::Uint),
-            VarType::Str => self.alloc(TypeKind::Str),
-            VarType::CStr => self.alloc(TypeKind::CStr),
-            VarType::Bool => self.alloc(TypeKind::Bool),
+            VarType::Void => self.make(TypeKind::Void),
+            VarType::Int => self.make(TypeKind::Int),
+            VarType::Uint => self.make(TypeKind::Uint),
+            VarType::Str => self.make(TypeKind::Str),
+            VarType::CStr => self.make(TypeKind::CStr),
+            VarType::Bool => self.make(TypeKind::Bool),
             VarType::Ref(inner) => {
                 let inner_id = self.var_type_to_typeid(inner, symbols);
-                self.alloc(TypeKind::Ref(inner_id))
+                self.make(TypeKind::Ref(inner_id))
             }
             VarType::Custom((_, symbol_id)) => match symbol_id {
                 Some(symbol_id) => {
@@ -255,9 +276,9 @@ impl TypeArena {
                         SymbolKind::Var(_) => todo!(),
                         SymbolKind::Struct(struct_data) => TypeKind::Struct(struct_data.struct_id),
                     };
-                    self.alloc(kind)
+                    self.make(kind)
                 }
-                None => self.alloc(TypeKind::Unknown),
+                None => self.make(TypeKind::Unknown),
             },
 
             VarType::CChar => todo!(),
@@ -272,6 +293,9 @@ impl TypeArena {
             TypeKind::Void => "Void".to_string(),
             TypeKind::Bool => "Bool".to_string(),
             TypeKind::Struct(struct_id) => format!("Struct {}", struct_id.0),
+            TypeKind::Array { size, inner_type } => {
+                format!("[{}; {}]", self.kind_to_string(inner_type), size)
+            }
             TypeKind::Fn { .. } => "Fn".to_string(),
             TypeKind::Ref(type_id) => format!("&{}", self.kind_to_string(self.kind(*type_id))),
             TypeKind::Unknown => "Unknown".to_string(),

@@ -4,7 +4,7 @@
 //! Use: `dot -Tpng module.dot -o module.png` or `dot -Tsvg module.dot -o module.svg`
 
 use super::*;
-use crate::symbols::SymbolTable;
+use crate::{symbols::SymbolTable, types::TypeKind};
 use std::fmt::Write;
 
 impl<'a> Module<'a> {
@@ -281,11 +281,12 @@ fn symbol_name(symbol_id: SymbolId, module: &Module, symbols: &SymbolTable) -> S
     let interner = module.interner.read();
     interner.resolve(symbol.ident_id).to_string()
 }
-
 fn type_name(type_id: TypeId, module: &Module) -> String {
-    use crate::types::TypeKind;
+    type_kind_to_name(module.types.kind(type_id), module)
+}
 
-    match module.types.kind(type_id) {
+fn type_kind_to_name(type_kind: &TypeKind, module: &Module) -> String {
+    match type_kind {
         TypeKind::Int => "i32".to_string(),
         TypeKind::Uint => "u32".to_string(),
         TypeKind::Bool => "bool".to_string(),
@@ -297,6 +298,9 @@ fn type_name(type_id: TypeId, module: &Module) -> String {
         TypeKind::Fn { .. } => "fn".to_string(),
         TypeKind::Unknown => "?".to_string(),
         TypeKind::Var => "T".to_string(),
+        TypeKind::Array { size, inner_type } => {
+            format!("[{}; {}]", type_kind_to_name(inner_type, module), size)
+        }
     }
 }
 
