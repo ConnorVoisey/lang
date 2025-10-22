@@ -624,6 +624,29 @@ impl<'a> CLExporter<'a> {
                         .unwrap();
                     Some(fn_builder.ins().imul(left_val, right_val))
                 }
+                Op::Divide { left, right } => {
+                    let left_val = self
+                        .expr_to_cl(
+                            callee_func_id,
+                            left,
+                            fn_builder,
+                            obj_module,
+                            call_conv,
+                            stack_layout,
+                        )?
+                        .unwrap();
+                    let right_val = self
+                        .expr_to_cl(
+                            callee_func_id,
+                            right,
+                            fn_builder,
+                            obj_module,
+                            call_conv,
+                            stack_layout,
+                        )?
+                        .unwrap();
+                    Some(fn_builder.ins().sdiv(left_val, right_val))
+                }
                 Op::LessThan { left, right } => {
                     let left_val = self
                         .expr_to_cl(

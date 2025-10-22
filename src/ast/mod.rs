@@ -51,10 +51,11 @@ impl Ast {
         token
     }
 
-    // peeks ahead 1 token, could be made to take an offset and use that for the amount to peek
-    // ahead
-    fn peek_token(&mut self) -> Option<&Token> {
+    fn peek_token(&self) -> Option<&Token> {
         self.tokens.get(self.next_token_i)
+    }
+    fn peek_n_token(&self, amount: usize) -> Option<&Token> {
+        self.tokens.get(self.next_token_i + amount - 1)
     }
     fn skip_past_semi(&mut self) {
         while let Some(token) = self.next_token() {

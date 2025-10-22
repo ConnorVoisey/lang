@@ -101,7 +101,12 @@ pub enum ExprKind {
 }
 
 impl Ast {
-    pub fn parse_expr(&mut self, min_bp: u8, symbols: &mut SymbolTable) -> Option<AstExpr> {
+    pub fn parse_expr(
+        &mut self,
+        min_bp: u8,
+        symbols: &mut SymbolTable,
+        is_direct_if_cond: bool,
+    ) -> Option<AstExpr> {
         let start_token_at = self.curr_token_i();
 
         // make sure we have a token
@@ -128,7 +133,7 @@ impl Ast {
             TokenKind::BracketOpen => {
                 // '(' expr ')'
                 self.next_token();
-                let lhs = self.parse_expr(0, symbols);
+                let lhs = self.parse_expr(0, symbols, false);
                 match self.curr_token() {
                     Some(Token {
                         kind: TokenKind::BracketClose,
@@ -149,7 +154,7 @@ impl Ast {
             TokenKind::Subtract => {
                 let ((), r_bp) = prefix_binding_power(&TokenKind::Subtract);
                 self.next_token();
-                let rhs = match self.parse_expr(r_bp, symbols) {
+                let rhs = match self.parse_expr(r_bp, symbols, false) {
                     Some(e) => e,
                     None => {
                         // token for message: use current token if available, otherwise a dummy
@@ -234,7 +239,7 @@ impl Ast {
             TokenKind::Amp => {
                 let ((), r_bp) = prefix_binding_power(&TokenKind::Amp);
                 self.next_token();
-                let rhs = match self.parse_expr(r_bp, symbols) {
+                let rhs = match self.parse_expr(r_bp, symbols, false) {
                     Some(e) => e,
                     None => {
                         let tok = self.curr_token().cloned().unwrap_or(cur_token.clone());
@@ -298,7 +303,7 @@ impl Ast {
                     TokenKind::SquareBracketOpen => {
                         let mut args = vec![];
                         loop {
-                            if let Some(arg) = self.parse_expr(0, symbols) {
+                            if let Some(arg) = self.parse_expr(0, symbols, false) {
                                 args.push(arg);
                             } else {
                                 // parse_expr already pushed an error - try to recover
@@ -378,7 +383,7 @@ impl Ast {
                         }
 
                         loop {
-                            if let Some(arg) = self.parse_expr(0, symbols) {
+                            if let Some(arg) = self.parse_expr(0, symbols, false) {
                                 args.push(arg);
                             } else {
                                 // parse_expr pushed an error; attempt to continue
@@ -432,72 +437,80 @@ impl Ast {
                     }
 
                     TokenKind::CurlyBracketOpen => {
-                        let mut args = vec![];
+                        // Could be a struct decleration or it could be a block.
+                        // Peek ahead to find out
+                        if !is_direct_if_cond {
+                            let mut args = vec![];
 
-                        // Parse fields if not empty
-                        if !matches!(
-                            self.curr_token(),
-                            Some(Token {
-                                kind: TokenKind::CurlyBracketClose,
-                                ..
-                            })
-                        ) {
-                            while let Some(Token {
-                                kind: TokenKind::Ident(ident_id),
-                                ..
-                            }) = self.curr_token()
-                            {
-                                let ident_cloned = *ident_id;
-                                match self.next_token() {
-                                    Some(Token {
-                                        kind: TokenKind::Colon,
-                                        ..
-                                    }) => {
-                                        self.next_token();
-                                        let expr = self.parse_expr(0, symbols)?;
-                                        args.push((ident_cloned, expr));
-                                        // After parse_expr, cursor is at comma or '}'
-                                        if let Some(Token {
-                                            kind: TokenKind::Comma,
+                            // Parse fields if not empty
+                            if !matches!(
+                                self.curr_token(),
+                                Some(Token {
+                                    kind: TokenKind::CurlyBracketClose,
+                                    ..
+                                })
+                            ) {
+                                while let Some(Token {
+                                    kind: TokenKind::Ident(ident_id),
+                                    ..
+                                }) = self.curr_token()
+                                {
+                                    let ident_cloned = *ident_id;
+                                    match self.next_token() {
+                                        Some(Token {
+                                            kind: TokenKind::Colon,
                                             ..
-                                        }) = self.curr_token()
-                                        {
+                                        }) => {
                                             self.next_token();
+                                            let expr = self.parse_expr(0, symbols, false)?;
+                                            args.push((ident_cloned, expr));
+                                            // After parse_expr, cursor is at comma or '}'
+                                            if let Some(Token {
+                                                kind: TokenKind::Comma,
+                                                ..
+                                            }) = self.curr_token()
+                                            {
+                                                self.next_token();
+                                            }
                                         }
-                                    }
-                                    t => {
-                                        dbg!(t);
-                                        todo!();
+                                        t => {
+                                            dbg!(t);
+                                            todo!();
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // Consume '}'
-                        if matches!(
-                            self.curr_token(),
-                            Some(Token {
-                                kind: TokenKind::CurlyBracketClose,
-                                ..
+                            // Consume '}'
+                            if matches!(
+                                self.curr_token(),
+                                Some(Token {
+                                    kind: TokenKind::CurlyBracketClose,
+                                    ..
+                                })
+                            ) {
+                                self.next_token();
+                            } else {
+                                // TODO: proper error handling
+                            }
+
+                            Some(AstExpr {
+                                span: Span {
+                                    start: self.tokens[start_token_at].span.start,
+                                    end: self.tokens[self.curr_token_i()].span.end,
+                                },
+                                kind: ExprKind::Op(Box::new(Op::StructCreate {
+                                    ident: lhs?,
+                                    symbol_id: None,
+                                    args,
+                                })),
+                                type_id: None,
                             })
-                        ) {
-                            self.next_token();
                         } else {
-                            // TODO: proper error handling
+                            // TODO: this seems quite gross, refactor this at somepoint
+                            self.next_token_i -= 1;
+                            break;
                         }
-
-                        Some(AstExpr {
-                            span: Span {
-                                start: self.tokens[start_token_at].span.start,
-                                end: self.tokens[self.curr_token_i()].span.end,
-                            },
-                            kind: ExprKind::Op(Box::new(Op::StructCreate {
-                                ident: lhs?,
-                                symbol_id: None,
-                                args,
-                            })),
-                            type_id: None,
-                        })
                     }
 
                     _ => {
@@ -518,7 +531,7 @@ impl Ast {
                 }
 
                 self.next_token(); // consume operator
-                let rhs = self.parse_expr(r_bp, symbols);
+                let rhs = self.parse_expr(r_bp, symbols, false);
                 if rhs.is_none() {
                     // parse_expr pushed an error already — try to continue
                     // preserve lhs as-is or mark an error
@@ -846,7 +859,7 @@ mod test {
         let lexer = Lexer::from_src_str(src, &shared_interner).unwrap();
         let mut ast = Ast::new(lexer.tokens, shared_interner.clone());
         ast.next_token();
-        let expr = ast.parse_expr(0, &mut symbols).unwrap();
+        let expr = ast.parse_expr(0, &mut symbols, false).unwrap();
         ast.expr_to_debug(&expr)
     }
 

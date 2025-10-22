@@ -61,7 +61,8 @@ impl Ast {
                     ..
                 })
             ),
-            "Called parsed block not on a `{{`"
+            "Called parsed block not on a `{{`, got {:?}",
+            self.curr_token()
         );
         let block_open_token_at = self.curr_token_i();
         let mut statements = vec![];
@@ -142,7 +143,7 @@ impl Ast {
                         ident_id,
                         symbol_id,
                         ident_token_at: start_token_i + 1,
-                        expr: self.parse_expr(0, symbols)?,
+                        expr: self.parse_expr(0, symbols, false)?,
                     },
                 })
             }
@@ -153,7 +154,7 @@ impl Ast {
                 self.next_token();
                 Some(AstStatement {
                     start_token_at: start_token_i,
-                    kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols)?),
+                    kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols, false)?),
                 })
             }
             Some(Token {
@@ -186,13 +187,13 @@ impl Ast {
                             kind: StatementKind::Assignment {
                                 ident_id,
                                 ident_token_at: start_token_at + 1,
-                                expr: self.parse_expr(0, symbols)?,
+                                expr: self.parse_expr(0, symbols, false)?,
                                 symbol_id: symbols.lookup(ident_id),
                             },
                         })
                     }
                     _ => {
-                        let expr = self.parse_expr(0, symbols)?;
+                        let expr = self.parse_expr(0, symbols, false)?;
                         Some(AstStatement {
                             start_token_at,
                             kind: match self.curr_token() {
@@ -212,7 +213,7 @@ impl Ast {
             }) => {
                 let start_token_at = self.curr_token_i();
                 self.next_token();
-                let condition = self.parse_expr(0, symbols)?;
+                let condition = self.parse_expr(0, symbols, true)?;
                 let block = self.parse_block(symbols, false)?;
                 Some(AstStatement {
                     start_token_at,
@@ -221,7 +222,7 @@ impl Ast {
             }
             _ => {
                 let start_token_at = self.curr_token_i();
-                let expr = self.parse_expr(0, symbols)?;
+                let expr = self.parse_expr(0, symbols, false)?;
                 Some(AstStatement {
                     start_token_at,
                     kind: match self.curr_token() {

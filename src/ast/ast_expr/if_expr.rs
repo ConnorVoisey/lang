@@ -16,7 +16,7 @@ impl Ast {
         start_token_at: usize,
     ) -> Option<AstExpr> {
         self.next_token();
-        let condition = match self.parse_expr(0, symbols) {
+        let condition = match self.parse_expr(0, symbols, true) {
             Some(c) => c,
             None => {
                 let tok = self.curr_token().cloned().unwrap_or(cur_token.clone());
@@ -67,7 +67,7 @@ impl Ast {
                         }) => {
                             // else if
                             self.next_token(); // consume 'if'
-                            match self.parse_expr(0, symbols) {
+                            match self.parse_expr(0, symbols, true) {
                                 Some(cond) => {
                                     let blk = match self.parse_block(symbols, false) {
                                         Some(b) => b,
