@@ -2,7 +2,7 @@ use crate::{
     ast::{ast_fn::AstFunc, ast_struct::AstStruct, error::AstParseError},
     error::CompliationError,
     interner::{IdentId, SharedInterner},
-    lexer::{Token, TokenKind},
+    lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolTable},
 };
 
@@ -147,7 +147,7 @@ impl Ast {
         }
     }
 
-    fn parse_var_type(&mut self) -> (VarType, crate::lexer::Span) {
+    fn parse_var_type(&mut self) -> (VarType, Span) {
         match self.next_token() {
             Some(Token {
                 kind: TokenKind::Amp,

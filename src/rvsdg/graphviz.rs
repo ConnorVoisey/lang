@@ -161,8 +161,8 @@ impl Node {
             NodeKind::Const { value } => {
                 label.push_str("const ");
                 match value {
-                    ConstValue::I64(i) => label.push_str(&i.to_string()),
-                    ConstValue::U64(u) => label.push_str(&format!("{}u", u)),
+                    ConstValue::I32(i) => label.push_str(&i.to_string()),
+                    ConstValue::U32(u) => label.push_str(&format!("{}u", u)),
                     ConstValue::Bool(b) => label.push_str(&b.to_string()),
                     ConstValue::String(bytes) => {
                         // Show truncated string for graph clarity

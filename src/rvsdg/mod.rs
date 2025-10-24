@@ -107,6 +107,7 @@ pub enum InlineHint {
 
 // ===== Node =====
 
+#[derive(Debug)]
 pub struct Node {
     pub id: NodeId,
     pub kind: NodeKind,
@@ -219,8 +220,8 @@ pub enum NodeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConstValue {
-    I64(i64),
-    U64(u64),
+    I32(i64),
+    U32(u64),
     Bool(bool),
     String(Vec<u8>), // Null-terminated string data (for both CStr and Str)
 }

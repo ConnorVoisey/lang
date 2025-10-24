@@ -282,7 +282,9 @@ impl<'a> TypeChecker<'a> {
                     Atom::Str(_) => self.arena.str_type,
                     Atom::CStr(_) => self.arena.cstr_type,
                     Atom::Ident((_, symbol_id)) => {
-                        let sym = self.symbols.resolve(symbol_id.unwrap());
+                        let sym = self.symbols.resolve(symbol_id.unwrap_or_else(|| {
+                            panic!("symbol should have been resolved for expr: {:?}", expr)
+                        }));
                         match &sym.kind {
                             SymbolKind::Fn(data) => data.fn_type_id.unwrap(),
                             SymbolKind::Var(data) => data.type_id.unwrap(),

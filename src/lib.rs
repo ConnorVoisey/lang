@@ -1,9 +1,21 @@
 use crate::{
-    ast::Ast, cl_export::CLExporter, error::CompliationError, interner::SharedInterner,
-    lexer::Lexer, rvsdg::lower::AstLowering, struct_layout::StructLayoutInfo, symbols::SymbolTable,
-    type_checker::TypeChecker, types::TypeArena,
+    ast::Ast,
+    cl_export::CLExporter,
+    error::CompliationError,
+    interner::SharedInterner,
+    lexer::Lexer,
+    rvsdg::{lower::AstLowering, to_cranelift::RvsdgToCranelift},
+    struct_layout::StructLayoutInfo,
+    symbols::SymbolTable,
+    type_checker::TypeChecker,
+    types::TypeArena,
 };
-use std::{fs::read_to_string, process::Command};
+use cranelift_object::ObjectModule;
+use std::{
+    fs::{self, File, read_to_string},
+    path::PathBuf,
+    process::Command,
+};
 use target_lexicon::Triple;
 
 pub mod ast;
@@ -111,22 +123,43 @@ impl ModParser {
                 }
             }
 
-            // TODO: Compile RVSDG to Cranelift
-            // For now, fall back to direct compilation
-            println!(
-                "Note: RVSDG->Cranelift compilation not yet fully implemented, falling back to direct compilation"
-            );
+            // Create Cranelift object module (matching cl_export settings)
+            use cranelift_codegen::{
+                isa,
+                settings::{self, Configurable},
+            };
+            use cranelift_object::{ObjectBuilder, ObjectModule};
 
-            let mut cl_export = CLExporter::new(
-                interner.clone(),
-                Triple::host(),
-                config.print_ir,
-                &ast,
-                &type_arena,
-                &mut symbols,
-                struct_layouts,
-            );
-            cl_export.cl_compile().unwrap();
+            let mut shared_builder = settings::builder();
+            shared_builder.enable("is_pic").unwrap();
+            shared_builder.set("opt_level", "speed").unwrap();
+            let shared_flags = settings::Flags::new(shared_builder);
+
+            let isa_builder = isa::lookup(Triple::host()).unwrap();
+            let isa = isa_builder.finish(shared_flags).unwrap();
+            let call_conv = isa.default_call_conv();
+
+            let obj_builder =
+                ObjectBuilder::new(isa, "main", cranelift_module::default_libcall_names()).unwrap();
+            let mut cl_module = ObjectModule::new(obj_builder);
+
+            // Compile RVSDG to Cranelift
+            let rvsdg_to_cl = RvsdgToCranelift::new(&rvsdg_module, &symbols, &struct_layouts);
+            rvsdg_to_cl
+                .compile(&mut cl_module, call_conv)
+                .expect("RVSDG to Cranelift compilation failed");
+
+            // Finalize and write object file
+            fs::create_dir_all("./lang_tmp").ok();
+            let obj_product = cl_module.finish();
+            let output = PathBuf::from("./lang_tmp/out.o");
+            let mut file = File::create(output).unwrap();
+            obj_product.object.write_stream(&mut file).unwrap();
+
+            if config.print_ir {
+                println!("\n=== RVSDG->Cranelift compilation complete ===");
+                println!("Object file written to: lang_tmp/out.o");
+            }
         } else {
             // Direct pipeline: AST -> Cranelift
             let mut cl_export = CLExporter::new(
@@ -145,10 +178,19 @@ impl ModParser {
         cc_comand.arg("lang_tmp/out.o").args(["-o", "out"]);
 
         match cc_comand.output() {
-            Ok(_) => (),
+            Ok(output) => {
+                if !output.status.success() {
+                    eprintln!("TCC linking failed with status: {}", output.status);
+                    eprintln!("=== TCC stdout ===");
+                    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+                    eprintln!("=== TCC stderr ===");
+                    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                    panic!();
+                }
+            }
             Err(e) => {
-                dbg!(e);
-                panic!();
+                eprintln!("Failed to execute TCC: {}", e);
+                return Err(CompliationError::LexingError(vec![e.into()]));
             }
         };
         let mod_parser = ModParser {};

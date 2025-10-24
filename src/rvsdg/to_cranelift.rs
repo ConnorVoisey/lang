@@ -3,21 +3,45 @@
 //! This module converts the high-level RVSDG representation into Cranelift IR.
 //! The conversion is designed for minimal overhead and fast compilation.
 
-use super::*;
-use crate::{struct_layout::StructLayout, symbols::SymbolTable, types::TypeKind};
+use crate::{
+    rvsdg::{
+        BinaryOp, ConstValue, ExternFunction, Function, FunctionId, Module, Node, NodeId, NodeKind,
+        RegionId, UnaryOp, ValueId,
+    },
+    struct_layout::StructLayout,
+    symbols::SymbolTable,
+    types::{TypeArena, TypeId, TypeKind},
+};
 use cranelift::prelude::*;
 use cranelift_codegen::{
     Context,
-    ir::{Function as ClFunction, UserFuncName},
+    ir::{BlockArg, Function as ClFunction, UserFuncName},
 };
 use cranelift_module::{FuncId as ClFuncId, Linkage, Module as ClModuleTrait};
 use cranelift_object::ObjectModule;
 use isa::CallConv;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
+
+/// Convert an RVSDG type to a Cranelift type
+fn type_to_cl(types: &TypeArena, type_id: TypeId) -> types::Type {
+    match types.kind(type_id) {
+        TypeKind::Int => types::I32,
+        TypeKind::Uint => types::I32,
+        TypeKind::Bool => types::I8,
+        TypeKind::Str => todo!(),
+        TypeKind::CStr => todo!(),
+        TypeKind::Void => todo!(),
+        TypeKind::Struct(_) => todo!(),
+        TypeKind::Fn { .. } => todo!(),
+        TypeKind::Ref(_) => types::I64,
+        TypeKind::Unknown => todo!(),
+        TypeKind::Var => todo!(),
+        TypeKind::Array { .. } => todo!(),
+    }
+}
 
 pub struct RvsdgToCranelift<'a> {
-    module: &'a self::Module<'a>,
+    module: &'a Module<'a>,
     symbols: &'a SymbolTable,
     struct_layouts: &'a [StructLayout],
 
@@ -30,12 +54,15 @@ pub struct RvsdgToCranelift<'a> {
 
 pub struct FunctionCompiler<'a, 'b> {
     rvsdg_func: &'a Function,
-    module: &'a self::Module<'a>,
+    module: &'a Module<'a>,
     func_map: &'a FxHashMap<FunctionId, ClFuncId>,
     cl_module: &'b mut ObjectModule,
 
     // Map RVSDG values to Cranelift values
-    value_map: HashMap<ValueId, Value>,
+    value_map: FxHashMap<ValueId, Value>,
+
+    // Map structural nodes to their Cranelift blocks
+    block_map: FxHashMap<NodeId, Vec<Block>>,
 
     // Cranelift builder
     builder: FunctionBuilder<'a>,
@@ -65,9 +92,11 @@ impl<'a> RvsdgToCranelift<'a> {
         call_conv: CallConv,
     ) -> color_eyre::Result<()> {
         // First pass: declare all functions
+        let mut sigs = Vec::with_capacity(self.module.functions.len());
         for func in &self.module.functions {
-            let cl_func_id = self.declare_function(func, cl_module, call_conv)?;
+            let (cl_func_id, sig) = self.declare_function(func, cl_module, call_conv)?;
             self.func_map.insert(func.id, cl_func_id);
+            sigs.push(sig);
         }
 
         // Declare extern functions
@@ -77,8 +106,8 @@ impl<'a> RvsdgToCranelift<'a> {
         }
 
         // Second pass: compile function bodies
-        for func in &self.module.functions {
-            self.compile_function(func, cl_module, call_conv)?;
+        for (i, func) in self.module.functions.iter().enumerate() {
+            self.compile_function(func, sigs[i].clone(), cl_module, call_conv)?;
         }
 
         Ok(())
@@ -89,20 +118,17 @@ impl<'a> RvsdgToCranelift<'a> {
         func: &Function,
         cl_module: &mut ObjectModule,
         call_conv: CallConv,
-    ) -> color_eyre::Result<ClFuncId> {
+    ) -> color_eyre::Result<(ClFuncId, Signature)> {
         let mut sig = Signature::new(call_conv);
 
-        // Add parameters
         for param in &func.params {
             let cl_type = self.type_to_cl(param.ty);
             sig.params.push(AbiParam::new(cl_type));
         }
 
-        // Add return type
         let ret_cl_type = self.type_to_cl(func.return_type);
         sig.returns.push(AbiParam::new(ret_cl_type));
 
-        // Get function name
         let name = {
             let symbol = self.symbols.resolve(func.name);
             let reader = self.module.interner.read();
@@ -115,9 +141,10 @@ impl<'a> RvsdgToCranelift<'a> {
             Linkage::Local
         };
 
-        cl_module
-            .declare_function(&name, linkage, &sig)
-            .map_err(|e| color_eyre::eyre::eyre!("Failed to declare function: {}", e))
+        match cl_module.declare_function(&name, linkage, &sig) {
+            Ok(f) => Ok((f, sig)),
+            Err(e) => Err(color_eyre::eyre::eyre!("Failed to declare function: {}", e)),
+        }
     }
 
     fn declare_extern_function(
@@ -152,46 +179,28 @@ impl<'a> RvsdgToCranelift<'a> {
     fn compile_function(
         &mut self,
         func: &Function,
+        sig: Signature,
         cl_module: &mut ObjectModule,
         call_conv: CallConv,
     ) -> color_eyre::Result<()> {
         let cl_func_id = self.func_map[&func.id];
 
-        // Build Cranelift signature
-        let mut sig = Signature::new(call_conv);
-        for param in &func.params {
-            sig.params.push(AbiParam::new(self.type_to_cl(param.ty)));
-        }
-        sig.returns
-            .push(AbiParam::new(self.type_to_cl(func.return_type)));
-
-        // Create Cranelift function
         let mut cl_func = ClFunction::with_name_signature(UserFuncName::user(0, 0), sig);
         let mut func_ctx = FunctionBuilderContext::new();
         let builder = FunctionBuilder::new(&mut cl_func, &mut func_ctx);
 
-        // Compile the function body
-        let mut compiler =
-            FunctionCompiler::new(func, self.module, &self.func_map, cl_module, builder);
+        let compiler = FunctionCompiler::new(func, self.module, &self.func_map, cl_module, builder);
         compiler.compile()?;
 
-        // Define the function
         let mut context = Context::for_function(cl_func);
+
         cl_module
             .define_function(cl_func_id, &mut context)
             .map_err(|e| color_eyre::eyre::eyre!("Failed to define function: {}", e))
     }
 
     fn type_to_cl(&self, type_id: TypeId) -> types::Type {
-        match self.module.types.kind(type_id) {
-            TypeKind::Int => types::I32,
-            TypeKind::Uint => types::I32,
-            TypeKind::Bool => types::I8,
-            TypeKind::Ref(_) => types::I64,
-            TypeKind::Struct(_) => types::I64, // Pointer to struct
-            TypeKind::Void => types::I32,      // Placeholder
-            _ => types::I32,                   // Default fallback
-        }
+        type_to_cl(self.module.types, type_id)
     }
 }
 
@@ -208,7 +217,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             module,
             func_map,
             cl_module,
-            value_map: HashMap::new(),
+            value_map: FxHashMap::default(),
+            block_map: FxHashMap::default(),
             builder,
             string_counter: 0,
         }
@@ -221,26 +231,34 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         self.builder
             .append_block_params_for_function_params(entry_block);
 
-        // Map function parameters
-        for (i, param) in self.rvsdg_func.params.iter().enumerate() {
+        // Get the lambda region and its parameter nodes
+        let root_node = self.rvsdg_func.node(self.rvsdg_func.root);
+        let lambda_region_id = match &root_node.kind {
+            NodeKind::Lambda { region } => *region,
+            _ => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Root node is not a Lambda, found: {:?}",
+                    root_node.kind
+                ));
+            }
+        };
+
+        // Get lambda region's parameter nodes
+        let lambda_params = self.rvsdg_func.region(lambda_region_id).params.clone();
+
+        // Map function parameters to their region param nodes
+        for (i, &param_node_id) in lambda_params.iter().enumerate() {
             let cl_param = self.builder.block_params(entry_block)[i];
-            // Create a ValueId for this parameter
-            let param_node = NodeId(i); // Assuming parameters are the first nodes
             let param_value = ValueId {
-                node: param_node,
+                node: param_node_id,
                 output_index: 0,
             };
             self.value_map.insert(param_value, cl_param);
         }
 
-        // Compile the root lambda node
-        let root_node = self.rvsdg_func.node(self.rvsdg_func.root);
-        if let NodeKind::Lambda { region } = &root_node.kind {
-            // For now, just return a dummy value
-            // TODO: Properly compile the lambda region
-            let dummy_ret = self.builder.ins().iconst(types::I32, 0);
-            self.builder.ins().return_(&[dummy_ret]);
-        }
+        // Compile the lambda region
+        let ret_val = self.compile_lambda(lambda_region_id)?;
+        self.builder.ins().return_(&ret_val);
 
         self.builder.seal_all_blocks();
         self.builder.finalize();
@@ -248,18 +266,58 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         Ok(())
     }
 
-    fn compile_region(&mut self, region_id: RegionId) -> color_eyre::Result<Vec<Value>> {
-        // TODO: Implement region compilation
-        // This would iterate through nodes in the region and compile them
-        Ok(vec![])
+    fn compile_lambda(&mut self, region_id: RegionId) -> color_eyre::Result<Vec<Value>> {
+        self.compile_region_impl(region_id)
+    }
+    fn compile_region(
+        &mut self,
+        region_id: RegionId,
+        inputs: &[Value],
+    ) -> color_eyre::Result<Vec<Value>> {
+        let region = self.rvsdg_func.region(region_id);
+
+        // Map region parameters to the input values
+        for (i, &param_node_id) in region.params.iter().enumerate() {
+            let value_id = ValueId {
+                node: param_node_id,
+                output_index: 0,
+            };
+            self.value_map.insert(value_id, inputs[i]);
+        }
+
+        self.compile_region_impl(region_id)
+    }
+
+    fn compile_region_impl(&mut self, region_id: RegionId) -> color_eyre::Result<Vec<Value>> {
+        let region = self.rvsdg_func.region(region_id);
+
+        // Region params are already mapped (they correspond to function params)
+        // Or if they're separate, map them here
+
+        // Compile all nodes in topological order
+        for &node_id in &region.nodes {
+            let node = self.rvsdg_func.node(node_id);
+            self.compile_node(node)?;
+        }
+
+        let mut results = Vec::new();
+        for &result_node_id in &region.results {
+            let node = self.rvsdg_func.node(result_node_id);
+            if let NodeKind::RegionResult = node.kind {
+                let input_value = node.inputs[0]; // Result node takes one input
+                results.push(self.get_value(input_value)?);
+            }
+        }
+
+        Ok(results)
     }
 
     fn compile_node(&mut self, node: &Node) -> color_eyre::Result<Option<Value>> {
         match &node.kind {
             NodeKind::Const { value } => {
                 let cl_val = match value {
-                    ConstValue::I64(i) => self.builder.ins().iconst(types::I32, *i),
-                    ConstValue::U64(u) => self.builder.ins().iconst(types::I32, *u as i64),
+                    ConstValue::I32(i) => self.builder.ins().iconst(types::I32, *i),
+                    ConstValue::U32(u) => self.builder.ins().iconst(types::I32, *u as i64),
                     ConstValue::Bool(b) => self.builder.ins().iconst(types::I8, *b as i64),
                     ConstValue::String(bytes) => {
                         // Declare global data for the string
@@ -290,6 +348,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                         self.builder.ins().global_value(types::I64, global_value)
                     }
                 };
+                self.value_map.insert(
+                    ValueId {
+                        node: node.id,
+                        output_index: 0,
+                    },
+                    cl_val,
+                );
                 Ok(Some(cl_val))
             }
 
@@ -298,7 +363,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 let lhs = self.get_value(node.inputs[0])?;
                 let rhs = self.get_value(node.inputs[1])?;
 
-                let result = match op {
+                let cl_val = match op {
                     BinaryOp::Add => self.builder.ins().iadd(lhs, rhs),
                     BinaryOp::Sub => self.builder.ins().isub(lhs, rhs),
                     BinaryOp::Mul => self.builder.ins().imul(lhs, rhs),
@@ -318,8 +383,285 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     BinaryOp::Ne => self.builder.ins().icmp(IntCC::NotEqual, lhs, rhs),
                     _ => return Err(color_eyre::eyre::eyre!("Unsupported binary op: {:?}", op)),
                 };
+                self.value_map.insert(
+                    ValueId {
+                        node: node.id,
+                        output_index: 0,
+                    },
+                    cl_val,
+                );
 
-                Ok(Some(result))
+                Ok(Some(cl_val))
+            }
+
+            NodeKind::Unary { op } => {
+                // Get input value
+                let operand = self.get_value(node.inputs[0])?;
+
+                let cl_val = match op {
+                    UnaryOp::Neg => self.builder.ins().ineg(operand),
+                    UnaryOp::Not => {
+                        // For booleans: XOR with 1 to flip the bit
+                        let one = self.builder.ins().iconst(types::I8, 1);
+                        self.builder.ins().bxor(operand, one)
+                    }
+                };
+                self.value_map.insert(
+                    ValueId {
+                        node: node.id,
+                        output_index: 0,
+                    },
+                    cl_val,
+                );
+
+                Ok(Some(cl_val))
+            }
+
+            NodeKind::Call { function } => {
+                // Get the Cranelift function ID
+                let cl_func_id = *self.func_map.get(function).ok_or_else(|| {
+                    color_eyre::eyre::eyre!("Function {:?} not found in func_map", function)
+                })?;
+
+                // Declare the function in the current function
+                let func_ref = self
+                    .cl_module
+                    .declare_func_in_func(cl_func_id, self.builder.func);
+
+                // First input is state token (skip it), rest are actual arguments
+                let args: Vec<Value> = node.inputs[1..]
+                    .iter()
+                    .map(|&value_id| self.get_value(value_id))
+                    .collect::<color_eyre::Result<Vec<_>>>()?;
+
+                // Make the call
+                let inst = self.builder.ins().call(func_ref, &args);
+
+                // Get return values from the call
+                let results = self.builder.inst_results(inst);
+
+                // Store the return value (output index 1, since 0 is the state token)
+                // Note: We don't store the state token in value_map since it has no Cranelift representation
+                if !results.is_empty() {
+                    let return_value = results[0];
+                    self.value_map.insert(
+                        ValueId {
+                            node: node.id,
+                            output_index: 1,
+                        },
+                        return_value,
+                    );
+                }
+
+                Ok(None)
+            }
+
+            NodeKind::Gamma { regions } => {
+                // Gamma: conditional branch (if/else)
+                // Inputs: [condition, ...captured_values]
+                // Outputs: merged results from all branches
+
+                // Get the condition value
+                let condition = self.get_value(node.inputs[0])?;
+
+                // Create blocks for each region (typically 2: true and false)
+                let mut region_blocks = Vec::new();
+                for _ in regions {
+                    let block = self.builder.create_block();
+                    region_blocks.push(block);
+                }
+
+                // Create merge block for phi nodes
+                let merge_block = self.builder.create_block();
+
+                // Add block parameters to merge block (skip state tokens/void types)
+                // State tokens don't have runtime representation, so we filter them out
+                let non_void_output_indices: Vec<_> = node
+                    .output_types
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ty)| !matches!(self.module.types.kind(**ty), TypeKind::Void))
+                    .collect();
+
+                for (_, output_ty) in &non_void_output_indices {
+                    let cl_type = type_to_cl(self.module.types, **output_ty);
+                    self.builder.append_block_param(merge_block, cl_type);
+                }
+
+                // Branch on condition (true -> regions[0], false -> regions[1])
+                // For now, assume binary if/else (2 regions)
+                if regions.len() == 2 {
+                    self.builder.ins().brif(
+                        condition,
+                        region_blocks[0],
+                        &[],
+                        region_blocks[1],
+                        &[],
+                    );
+                } else {
+                    return Err(color_eyre::eyre::eyre!(
+                        "Gamma with {} regions not yet supported (expected 2)",
+                        regions.len()
+                    ));
+                }
+
+                // Compile each region in its block
+                for (i, &region_id) in regions.iter().enumerate() {
+                    self.builder.switch_to_block(region_blocks[i]);
+
+                    // Get captured values (skip first input which is condition)
+                    let captured_inputs: Vec<Value> = node.inputs[1..]
+                        .iter()
+                        .map(|&vid| self.get_value(vid))
+                        .collect::<color_eyre::Result<Vec<_>>>()?;
+
+                    // Compile the region with captured values
+                    let region_results = self.compile_region(region_id, &captured_inputs)?;
+
+                    // Filter region results to only include non-void outputs
+                    let filtered_results: Vec<Value> = non_void_output_indices
+                        .iter()
+                        .map(|(idx, _)| region_results[*idx])
+                        .collect();
+
+                    // Jump to merge block with filtered results (convert Values to BlockArgs)
+                    let block_args: Vec<_> = filtered_results
+                        .iter()
+                        .map(|&v| BlockArg::Value(v))
+                        .collect();
+                    self.builder.ins().jump(merge_block, &block_args);
+                }
+
+                // Seal all blocks we created
+                for block in &region_blocks {
+                    self.builder.seal_block(*block);
+                }
+                self.builder.seal_block(merge_block);
+
+                // Continue in merge block
+                self.builder.switch_to_block(merge_block);
+
+                // Get the merged values from block parameters (phi nodes)
+                let merge_params = self.builder.block_params(merge_block);
+
+                // Store each non-void output in value_map
+                for (param_idx, &(orig_idx, _)) in non_void_output_indices.iter().enumerate() {
+                    self.value_map.insert(
+                        ValueId {
+                            node: node.id,
+                            output_index: orig_idx as u32,
+                        },
+                        merge_params[param_idx],
+                    );
+                }
+
+                Ok(None)
+            }
+
+            NodeKind::Theta { region } => {
+                // Theta: loop construct
+                // Inputs: [...initial_values]
+                // Region outputs: [condition, ...updated_values]
+                // Loop continues while condition is true
+
+                // Create blocks: header (with phi nodes), body, exit
+                let header_block = self.builder.create_block();
+                let body_block = self.builder.create_block();
+                let exit_block = self.builder.create_block();
+
+                // Add block parameters to header for loop-carried values (skip void types)
+                let non_void_output_indices: Vec<_> = node
+                    .output_types
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ty)| !matches!(self.module.types.kind(**ty), TypeKind::Void))
+                    .collect();
+
+                for (_, output_ty) in &non_void_output_indices {
+                    let cl_type = type_to_cl(self.module.types, **output_ty);
+                    self.builder.append_block_param(header_block, cl_type);
+                }
+
+                // Get initial values (only non-void ones, matching non_void_output_indices)
+                let initial_values: Vec<Value> = non_void_output_indices
+                    .iter()
+                    .map(|&(idx, _)| self.get_value(node.inputs[idx]))
+                    .collect::<color_eyre::Result<Vec<_>>>()?;
+
+                // Jump to header with initial values
+                let initial_args: Vec<_> =
+                    initial_values.iter().map(|&v| BlockArg::Value(v)).collect();
+                self.builder.ins().jump(header_block, &initial_args);
+
+                // Seal the current block (before header)
+                // Note: We can't seal header yet because body will jump back to it
+
+                // Switch to header block
+                self.builder.switch_to_block(header_block);
+
+                // Jump to body to start loop
+                self.builder.ins().jump(body_block, &[]);
+
+                // Switch to body block
+                self.builder.switch_to_block(body_block);
+
+                // Get header parameters (loop-carried values)
+                let header_params: Vec<Value> = self.builder.block_params(header_block).to_vec();
+
+                // Compile the loop region with loop-carried values as inputs
+                let region_results = self.compile_region(*region, &header_params)?;
+
+                // First result is the continuation condition, rest are updated values
+                if region_results.is_empty() {
+                    return Err(color_eyre::eyre::eyre!(
+                        "Theta region must produce at least a condition"
+                    ));
+                }
+
+                let condition = region_results[0];
+
+                // Filter updated values to only include non-void ones
+                let updated_values: Vec<Value> = non_void_output_indices
+                    .iter()
+                    .map(|&(idx, _)| region_results[idx + 1]) // +1 because first result is condition
+                    .collect();
+
+                // Branch: if condition is true, jump back to header, else exit
+                let updated_args: Vec<_> =
+                    updated_values.iter().map(|&v| BlockArg::Value(v)).collect();
+                self.builder
+                    .ins()
+                    .brif(condition, header_block, &updated_args, exit_block, &[]);
+
+                // Now we can seal header (all predecessors known: initial jump + body)
+                self.builder.seal_block(header_block);
+                self.builder.seal_block(body_block);
+
+                // Continue in exit block
+                self.builder.switch_to_block(exit_block);
+                self.builder.seal_block(exit_block);
+
+                // Store the final values (from header phi nodes) in value_map (skip void)
+                for (param_idx, &(orig_idx, _)) in non_void_output_indices.iter().enumerate() {
+                    self.value_map.insert(
+                        ValueId {
+                            node: node.id,
+                            output_index: orig_idx as u32,
+                        },
+                        header_params[param_idx],
+                    );
+                }
+
+                Ok(None)
+            }
+
+            // Nodes that don't produce Cranelift values (already handled elsewhere)
+            NodeKind::Parameter { .. }
+            | NodeKind::RegionParam { .. }
+            | NodeKind::StateToken
+            | NodeKind::RegionResult => {
+                // These are either already mapped or don't need Cranelift values
+                Ok(None)
             }
 
             _ => {

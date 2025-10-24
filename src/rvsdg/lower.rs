@@ -201,7 +201,19 @@ impl<'a> AstLowering<'a> {
 
         builder.end_region();
 
-        builder.finish()
+        let mut func = builder.finish();
+
+        // Mark the main function as exported so it's visible to the linker
+        let function_name = {
+            let interner = self.interner.read();
+            let symbol = self.symbols.resolve(func.name);
+            interner.resolve(symbol.ident_id).to_string()
+        };
+        if function_name == "main" {
+            func.is_exported = true;
+        }
+
+        func
     }
 
     fn lower_block(&mut self, builder: &mut FunctionBuilder, block: &AstBlock) -> Option<ValueId> {

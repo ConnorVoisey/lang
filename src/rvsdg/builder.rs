@@ -121,7 +121,7 @@ impl FunctionBuilder {
     pub fn const_i64(&mut self, value: i64, ty: TypeId, span: Span) -> ValueId {
         // Check cache
         let key = NodeKey {
-            kind: NodeKeyKind::Const(ConstValue::I64(value)),
+            kind: NodeKeyKind::Const(ConstValue::I32(value)),
             inputs: vec![],
             output_types: vec![ty],
         };
@@ -133,7 +133,7 @@ impl FunctionBuilder {
         // Create new node
         let node = self.alloc_node(
             NodeKind::Const {
-                value: ConstValue::I64(value),
+                value: ConstValue::I32(value),
             },
             vec![ty],
             vec![],
@@ -148,7 +148,7 @@ impl FunctionBuilder {
     pub fn const_u64(&mut self, value: u64, ty: TypeId, span: Span) -> ValueId {
         // Check cache
         let key = NodeKey {
-            kind: NodeKeyKind::Const(ConstValue::U64(value)),
+            kind: NodeKeyKind::Const(ConstValue::U32(value)),
             inputs: vec![],
             output_types: vec![ty],
         };
@@ -160,7 +160,7 @@ impl FunctionBuilder {
         // Create new node
         let node = self.alloc_node(
             NodeKind::Const {
-                value: ConstValue::U64(value),
+                value: ConstValue::U32(value),
             },
             vec![ty],
             vec![],
@@ -648,12 +648,12 @@ impl FunctionBuilder {
         let rhs_val = self.get_const_value(rhs)?;
 
         let result = match (lhs_val, rhs_val) {
-            (ConstValue::I64(a), ConstValue::I64(b)) => match op {
-                BinaryOp::Add => ConstValue::I64(a.wrapping_add(*b)),
-                BinaryOp::Sub => ConstValue::I64(a.wrapping_sub(*b)),
-                BinaryOp::Mul => ConstValue::I64(a.wrapping_mul(*b)),
-                BinaryOp::Div => ConstValue::I64(a.checked_div(*b)?),
-                BinaryOp::Rem => ConstValue::I64(a.checked_rem(*b)?),
+            (ConstValue::I32(a), ConstValue::I32(b)) => match op {
+                BinaryOp::Add => ConstValue::I32(a.wrapping_add(*b)),
+                BinaryOp::Sub => ConstValue::I32(a.wrapping_sub(*b)),
+                BinaryOp::Mul => ConstValue::I32(a.wrapping_mul(*b)),
+                BinaryOp::Div => ConstValue::I32(a.checked_div(*b)?),
+                BinaryOp::Rem => ConstValue::I32(a.checked_rem(*b)?),
                 BinaryOp::Lt => ConstValue::Bool(a < b),
                 BinaryOp::Le => ConstValue::Bool(a <= b),
                 BinaryOp::Gt => ConstValue::Bool(a > b),
@@ -662,12 +662,12 @@ impl FunctionBuilder {
                 BinaryOp::Ne => ConstValue::Bool(a != b),
                 _ => return None,
             },
-            (ConstValue::U64(a), ConstValue::U64(b)) => match op {
-                BinaryOp::Add => ConstValue::U64(a.wrapping_add(*b)),
-                BinaryOp::Sub => ConstValue::U64(a.wrapping_sub(*b)),
-                BinaryOp::Mul => ConstValue::U64(a.wrapping_mul(*b)),
-                BinaryOp::Div => ConstValue::U64(a.checked_div(*b)?),
-                BinaryOp::Rem => ConstValue::U64(a.checked_rem(*b)?),
+            (ConstValue::U32(a), ConstValue::U32(b)) => match op {
+                BinaryOp::Add => ConstValue::U32(a.wrapping_add(*b)),
+                BinaryOp::Sub => ConstValue::U32(a.wrapping_sub(*b)),
+                BinaryOp::Mul => ConstValue::U32(a.wrapping_mul(*b)),
+                BinaryOp::Div => ConstValue::U32(a.checked_div(*b)?),
+                BinaryOp::Rem => ConstValue::U32(a.checked_rem(*b)?),
                 BinaryOp::Lt => ConstValue::Bool(a < b),
                 BinaryOp::Le => ConstValue::Bool(a <= b),
                 BinaryOp::Gt => ConstValue::Bool(a > b),
@@ -688,8 +688,8 @@ impl FunctionBuilder {
 
         // Create folded constant (will be cached)
         Some(match result {
-            ConstValue::I64(v) => self.const_i64(v, result_ty, span),
-            ConstValue::U64(v) => self.const_u64(v, result_ty, span),
+            ConstValue::I32(v) => self.const_i64(v, result_ty, span),
+            ConstValue::U32(v) => self.const_u64(v, result_ty, span),
             ConstValue::Bool(v) => self.const_bool(v, result_ty, span),
             ConstValue::String(_) => unreachable!("String constants cannot be folded"),
         })
@@ -706,16 +706,16 @@ impl FunctionBuilder {
         let operand_val = self.get_const_value(operand)?;
 
         let result = match (operand_val, op) {
-            (ConstValue::I64(v), UnaryOp::Neg) => ConstValue::I64(v.wrapping_neg()),
-            (ConstValue::U64(v), UnaryOp::Neg) => ConstValue::U64(v.wrapping_neg()),
+            (ConstValue::I32(v), UnaryOp::Neg) => ConstValue::I32(v.wrapping_neg()),
+            (ConstValue::U32(v), UnaryOp::Neg) => ConstValue::U32(v.wrapping_neg()),
             (ConstValue::Bool(v), UnaryOp::Not) => ConstValue::Bool(!v),
             _ => return None, // Type mismatch
         };
 
         // Create folded constant (will be cached)
         Some(match result {
-            ConstValue::I64(v) => self.const_i64(v, result_ty, span),
-            ConstValue::U64(v) => self.const_u64(v, result_ty, span),
+            ConstValue::I32(v) => self.const_i64(v, result_ty, span),
+            ConstValue::U32(v) => self.const_u64(v, result_ty, span),
             ConstValue::Bool(v) => self.const_bool(v, result_ty, span),
             ConstValue::String(_) => unreachable!("String constants cannot be folded"),
         })

@@ -162,8 +162,8 @@ impl Node {
             NodeKind::Const { value } => {
                 write!(out, "const ")?;
                 match value {
-                    ConstValue::I64(i) => writeln!(out, "{}", i)?,
-                    ConstValue::U64(u) => writeln!(out, "{}u", u)?,
+                    ConstValue::I32(i) => writeln!(out, "{}", i)?,
+                    ConstValue::U32(u) => writeln!(out, "{}u", u)?,
                     ConstValue::Bool(b) => writeln!(out, "{}", b)?,
                     ConstValue::String(bytes) => {
                         // Display as escaped string, omit trailing null terminator
