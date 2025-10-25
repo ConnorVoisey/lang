@@ -2,15 +2,16 @@ import {
 }
 
 extern "C" {
+    fn puts(str &CStr) Int;
     fn printf(str &CStr, param_1 Int) Int;
 }
 
-fn add(num_1 Int) Int {
- num_1
+fn add() Int {
+    20
 }
 
 fn main() Int {
-    let foo = add(15);
+    let foo = puts(&c"testing");
     let bar = 10;
 
     if foo < 20 {
