@@ -56,8 +56,9 @@ impl<'a> AstLowering<'a> {
 
     pub fn lower_module(mut self) -> Module<'a> {
         let mut module = Module::new(self.types, self.interner.clone());
+        // First register all functions
 
-        // First pass: register all functions
+        // Register internal functions
         for func in &self.ast.fns {
             let func_id = FunctionId(self.next_func_id);
             self.next_func_id += 1;
@@ -140,7 +141,8 @@ impl<'a> AstLowering<'a> {
                     _ => panic!("Parameter symbol is not a function argument"),
                 };
 
-                // Create a dummy span for parameters
+                // TODO: review if spans are even needed for RVSDG, currently there isn't enough
+                // info to generate them accurately
                 let span = Span { start: 0, end: 0 };
 
                 Parameter {

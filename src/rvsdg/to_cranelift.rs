@@ -23,20 +23,21 @@ use isa::CallConv;
 use rustc_hash::FxHashMap;
 
 /// Convert an RVSDG type to a Cranelift type
-fn type_to_cl(types: &TypeArena, type_id: TypeId) -> types::Type {
+fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
     match types.kind(type_id) {
-        TypeKind::Int => types::I32,
-        TypeKind::Uint => types::I32,
-        TypeKind::Bool => types::I8,
+        TypeKind::Int => Some(types::I32),
+        TypeKind::Uint => Some(types::I32),
+        TypeKind::Bool => Some(types::I8),
         TypeKind::Str => todo!(),
         TypeKind::CStr => todo!(),
         TypeKind::Void => todo!(),
         TypeKind::Struct(_) => todo!(),
         TypeKind::Fn { .. } => todo!(),
-        TypeKind::Ref(_) => types::I64,
+        TypeKind::Ref(_) => Some(types::I64),
         TypeKind::Unknown => todo!(),
         TypeKind::Var => todo!(),
         TypeKind::Array { .. } => todo!(),
+        TypeKind::State => None,
     }
 }
 
@@ -123,11 +124,15 @@ impl<'a> RvsdgToCranelift<'a> {
 
         for param in &func.params {
             let cl_type = self.type_to_cl(param.ty);
-            sig.params.push(AbiParam::new(cl_type));
+            sig.params.push(AbiParam::new(
+                cl_type.expect("to cl type should be a valid value got none"),
+            ));
         }
 
         let ret_cl_type = self.type_to_cl(func.return_type);
-        sig.returns.push(AbiParam::new(ret_cl_type));
+        sig.returns.push(AbiParam::new(
+            ret_cl_type.expect("to cl type should be a valid value got none"),
+        ));
 
         let name = {
             let symbol = self.symbols.resolve(func.name);
@@ -157,12 +162,16 @@ impl<'a> RvsdgToCranelift<'a> {
         // Add parameters
         for &param_ty in &extern_fn.param_types {
             let cl_type = self.type_to_cl(param_ty);
-            sig.params.push(AbiParam::new(cl_type));
+            sig.params.push(AbiParam::new(
+                cl_type.expect("to cl type should be a valid value, got none"),
+            ));
         }
 
         // Add return type
         let ret_cl_type = self.type_to_cl(extern_fn.return_type);
-        sig.returns.push(AbiParam::new(ret_cl_type));
+        sig.returns.push(AbiParam::new(
+            ret_cl_type.expect("to cl type should be a valid value, got none"),
+        ));
 
         // Get function name
         let name = {
@@ -199,7 +208,7 @@ impl<'a> RvsdgToCranelift<'a> {
             .map_err(|e| color_eyre::eyre::eyre!("Failed to define function: {}", e))
     }
 
-    fn type_to_cl(&self, type_id: TypeId) -> types::Type {
+    fn type_to_cl(&self, type_id: TypeId) -> Option<types::Type> {
         type_to_cl(self.module.types, type_id)
     }
 }
@@ -485,7 +494,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 for (_, output_ty) in &non_void_output_indices {
                     let cl_type = type_to_cl(self.module.types, **output_ty);
-                    self.builder.append_block_param(merge_block, cl_type);
+                    self.builder.append_block_param(
+                        merge_block,
+                        cl_type.expect("to cl type should be a vaild value"),
+                    );
                 }
 
                 // Branch on condition (true -> regions[0], false -> regions[1])
@@ -579,7 +591,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 for (_, output_ty) in &non_void_output_indices {
                     let cl_type = type_to_cl(self.module.types, **output_ty);
-                    self.builder.append_block_param(header_block, cl_type);
+                    self.builder.append_block_param(
+                        header_block,
+                        cl_type.expect("to cl type should be a valid value, got none"),
+                    );
                 }
 
                 // Get initial values (only non-void ones, matching non_void_output_indices)

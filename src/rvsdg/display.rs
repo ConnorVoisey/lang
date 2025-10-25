@@ -4,7 +4,7 @@
 //! textual representation of the RVSDG for debugging and inspection.
 
 use super::*;
-use crate::{symbols::SymbolTable, types::TypeKind};
+use crate::symbols::SymbolTable;
 use std::fmt::{self, Write};
 
 impl<'a> Module<'a> {
@@ -331,33 +331,7 @@ fn symbol_name(symbol_id: SymbolId, module: &Module, symbols: &SymbolTable) -> S
     interner.resolve(symbol.ident_id).to_string()
 }
 
+#[inline]
 fn type_name(type_id: TypeId, module: &Module) -> String {
-    type_kind_to_name(module.types.kind(type_id), module)
-}
-
-// TODO: this function is incredibly similar to graphiz.rs
-fn type_kind_to_name(type_kind: &TypeKind, module: &Module) -> String {
-    match type_kind {
-        TypeKind::Int => "i32".to_string(),
-        TypeKind::Uint => "u32".to_string(),
-        TypeKind::Bool => "bool".to_string(),
-        TypeKind::Void => "void".to_string(),
-        TypeKind::Str => "str".to_string(),
-        TypeKind::CStr => "cstr".to_string(),
-        TypeKind::Ref(inner) => format!("&{}", type_name(*inner, module)),
-        TypeKind::Struct(id) => format!("struct#{}", id.0),
-        TypeKind::Fn { params, ret, .. } => {
-            let param_str: Vec<_> = params.iter().map(|&p| type_name(p, module)).collect();
-            format!(
-                "fn({}) -> {}",
-                param_str.join(", "),
-                type_name(*ret, module)
-            )
-        }
-        TypeKind::Array { size, inner_type } => {
-            format!("[{}; {}]", type_kind_to_name(inner_type, module), size)
-        }
-        TypeKind::Unknown => "?".to_string(),
-        TypeKind::Var => "T".to_string(),
-    }
+    module.types.id_to_debug_string(type_id)
 }

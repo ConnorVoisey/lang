@@ -1,6 +1,5 @@
 use crate::{
     ast::Ast,
-    cl_export::CLExporter,
     error::CompliationError,
     interner::SharedInterner,
     lexer::Lexer,
@@ -10,7 +9,6 @@ use crate::{
     type_checker::TypeChecker,
     types::TypeArena,
 };
-use cranelift_object::ObjectModule;
 use std::{
     fs::{self, File, read_to_string},
     path::PathBuf,
@@ -19,7 +17,6 @@ use std::{
 use target_lexicon::Triple;
 
 pub mod ast;
-pub mod cl_export;
 pub mod error;
 pub mod interner;
 pub mod lexer;
@@ -89,89 +86,75 @@ impl ModParser {
         }
         let struct_layouts = StructLayoutInfo::new(&type_arena).compute_struct_layout();
 
-        if config.use_rvsdg {
-            // RVSDG pipeline: AST -> RVSDG -> Cranelift
-            let lowering = AstLowering::new(&ast, &type_arena, &symbols, interner.clone());
-            let rvsdg_module = lowering.lower_module();
+        // RVSDG pipeline: AST -> RVSDG -> Cranelift
+        let lowering = AstLowering::new(&ast, &type_arena, &symbols, interner.clone());
+        let rvsdg_module = lowering.lower_module();
 
-            println!(
-                "RVSDG module created with {} functions",
-                rvsdg_module.functions.len()
-            );
+        println!(
+            "RVSDG module created with {} functions",
+            rvsdg_module.functions.len()
+        );
 
-            // Dump RVSDG if requested
-            if config.dump_rvsdg {
-                use std::fs;
-                use std::io::Write;
+        // Dump RVSDG if requested
+        if config.dump_rvsdg {
+            use std::fs;
+            use std::io::Write;
 
-                fs::create_dir_all("./lang_tmp").ok();
-
-                // Dump textual format
-                let text = rvsdg_module.display(&symbols);
-                if let Ok(mut file) = std::fs::File::create("./lang_tmp/rvsdg.txt") {
-                    file.write_all(text.as_bytes()).ok();
-                    println!("RVSDG textual format written to: lang_tmp/rvsdg.txt");
-                }
-
-                // Dump DOT format
-                let dot = rvsdg_module.to_dot(&symbols);
-                if let Ok(mut file) = std::fs::File::create("./lang_tmp/rvsdg.dot") {
-                    file.write_all(dot.as_bytes()).ok();
-                    println!("RVSDG DOT format written to: lang_tmp/rvsdg.dot");
-                    println!("  View with: dot -Tpng lang_tmp/rvsdg.dot -o lang_tmp/rvsdg.png");
-                    println!("  Or online: https://dreampuf.github.io/GraphvizOnline/");
-                }
-            }
-
-            // Create Cranelift object module (matching cl_export settings)
-            use cranelift_codegen::{
-                isa,
-                settings::{self, Configurable},
-            };
-            use cranelift_object::{ObjectBuilder, ObjectModule};
-
-            let mut shared_builder = settings::builder();
-            shared_builder.enable("is_pic").unwrap();
-            shared_builder.set("opt_level", "speed").unwrap();
-            let shared_flags = settings::Flags::new(shared_builder);
-
-            let isa_builder = isa::lookup(Triple::host()).unwrap();
-            let isa = isa_builder.finish(shared_flags).unwrap();
-            let call_conv = isa.default_call_conv();
-
-            let obj_builder =
-                ObjectBuilder::new(isa, "main", cranelift_module::default_libcall_names()).unwrap();
-            let mut cl_module = ObjectModule::new(obj_builder);
-
-            // Compile RVSDG to Cranelift
-            let rvsdg_to_cl = RvsdgToCranelift::new(&rvsdg_module, &symbols, &struct_layouts);
-            rvsdg_to_cl
-                .compile(&mut cl_module, call_conv)
-                .expect("RVSDG to Cranelift compilation failed");
-
-            // Finalize and write object file
             fs::create_dir_all("./lang_tmp").ok();
-            let obj_product = cl_module.finish();
-            let output = PathBuf::from("./lang_tmp/out.o");
-            let mut file = File::create(output).unwrap();
-            obj_product.object.write_stream(&mut file).unwrap();
 
-            if config.print_ir {
-                println!("\n=== RVSDG->Cranelift compilation complete ===");
-                println!("Object file written to: lang_tmp/out.o");
+            // Dump textual format
+            let text = rvsdg_module.display(&symbols);
+            if let Ok(mut file) = std::fs::File::create("./lang_tmp/rvsdg.txt") {
+                file.write_all(text.as_bytes()).ok();
+                println!("RVSDG textual format written to: lang_tmp/rvsdg.txt");
             }
-        } else {
-            // Direct pipeline: AST -> Cranelift
-            let mut cl_export = CLExporter::new(
-                interner.clone(),
-                Triple::host(),
-                config.print_ir,
-                &ast,
-                &type_arena,
-                &mut symbols,
-                struct_layouts,
-            );
-            cl_export.cl_compile().unwrap();
+
+            // Dump DOT format
+            let dot = rvsdg_module.to_dot(&symbols);
+            if let Ok(mut file) = std::fs::File::create("./lang_tmp/rvsdg.dot") {
+                file.write_all(dot.as_bytes()).ok();
+                println!("RVSDG DOT format written to: lang_tmp/rvsdg.dot");
+                println!("  View with: dot -Tpng lang_tmp/rvsdg.dot -o lang_tmp/rvsdg.png");
+                println!("  Or online: https://dreampuf.github.io/GraphvizOnline/");
+            }
+        }
+
+        // Create Cranelift object module (matching cl_export settings)
+        use cranelift_codegen::{
+            isa,
+            settings::{self, Configurable},
+        };
+        use cranelift_object::{ObjectBuilder, ObjectModule};
+
+        let mut shared_builder = settings::builder();
+        shared_builder.enable("is_pic").unwrap();
+        shared_builder.set("opt_level", "speed").unwrap();
+        let shared_flags = settings::Flags::new(shared_builder);
+
+        let isa_builder = isa::lookup(Triple::host()).unwrap();
+        let isa = isa_builder.finish(shared_flags).unwrap();
+        let call_conv = isa.default_call_conv();
+
+        let obj_builder =
+            ObjectBuilder::new(isa, "main", cranelift_module::default_libcall_names()).unwrap();
+        let mut cl_module = ObjectModule::new(obj_builder);
+
+        // Compile RVSDG to Cranelift
+        let rvsdg_to_cl = RvsdgToCranelift::new(&rvsdg_module, &symbols, &struct_layouts);
+        rvsdg_to_cl
+            .compile(&mut cl_module, call_conv)
+            .expect("RVSDG to Cranelift compilation failed");
+
+        // Finalize and write object file
+        fs::create_dir_all("./lang_tmp").ok();
+        let obj_product = cl_module.finish();
+        let output = PathBuf::from("./lang_tmp/out.o");
+        let mut file = File::create(output).unwrap();
+        obj_product.object.write_stream(&mut file).unwrap();
+
+        if config.print_ir {
+            println!("\n=== RVSDG->Cranelift compilation complete ===");
+            println!("Object file written to: lang_tmp/out.o");
         }
 
         let mut cc_comand = Command::new("tcc");

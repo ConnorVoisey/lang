@@ -33,8 +33,9 @@ Basic compiler with minimal functionality.
 - [~] **Struct instantiation** - Creating struct instances with field initialization
 
 ### Phase 1: Core Infrastructure
+- [x] **RVSDG Basics** - Add the basics of an RVSDG IR layer between AST and cranelift
+- [ ] topoligical sort of nodes, might be correct automatically from ast but need to at least validate this
 - [ ] **Basic structs** - Field access, instantiation (in progress)
-- [ ] **Actually use HLIR SSA** - Switch from AST→Cranelift to AST→HLIR→Cranelift to avoid reimplementing features
 - [ ] **Arrays and slices** - Fixed-size arrays `[T; N]`, dynamic slices `[T]`
 - [ ] **String type implementation** - Proper length-aware strings (currently TODO in codegen)
 - [ ] **For loops** - Syntactic sugar over while/iterators
