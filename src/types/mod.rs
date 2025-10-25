@@ -32,6 +32,9 @@ pub enum TypeKind {
     Unknown,
     // Type variables are just IDs managed by union–find
     Var,
+
+    // Used only by state nodes inside RVSDG
+    State,
 }
 
 #[derive(Debug, Clone)]
@@ -300,10 +303,41 @@ impl TypeArena {
             TypeKind::Ref(type_id) => format!("&{}", self.kind_to_string(self.kind(*type_id))),
             TypeKind::Unknown => "Unknown".to_string(),
             TypeKind::Var => "Var".to_string(),
+            TypeKind::State => "State".to_string(),
         }
     }
 
     pub fn id_to_string(&self, type_id: TypeId) -> String {
+        self.kind_to_string(self.kind(type_id))
+    }
+    fn type_kind_to_debug_name(&self, kind: &TypeKind) -> String {
+        match kind {
+            TypeKind::Int => "i32".to_string(),
+            TypeKind::Uint => "u32".to_string(),
+            TypeKind::Bool => "bool".to_string(),
+            TypeKind::Void => "void".to_string(),
+            TypeKind::Str => "str".to_string(),
+            TypeKind::CStr => "cstr".to_string(),
+            TypeKind::Ref(inner) => format!("&{}", self.id_to_debug_string(*inner)),
+            TypeKind::Struct(id) => format!("struct#{}", id.0),
+            TypeKind::Fn { params, ret, .. } => {
+                let param_str: Vec<_> =
+                    params.iter().map(|&p| self.id_to_debug_string(p)).collect();
+                format!(
+                    "fn({}) -> {}",
+                    param_str.join(", "),
+                    self.id_to_debug_string(*ret)
+                )
+            }
+            TypeKind::Array { size, inner_type } => {
+                format!("[{}; {}]", self.type_kind_to_debug_name(inner_type), size)
+            }
+            TypeKind::Unknown => "?".to_string(),
+            TypeKind::Var => "T".to_string(),
+            TypeKind::State => "State".to_string(),
+        }
+    }
+    pub fn id_to_debug_string(&self, type_id: TypeId) -> String {
         self.kind_to_string(self.kind(type_id))
     }
 

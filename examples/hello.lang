@@ -5,15 +5,15 @@ extern "C" {
     fn printf(str &CStr, param_1 Int) Int;
 }
 
-fn add(num_1 Int) Int {
- num_1
+fn add(num_1 Int, num_2 Int) Int {
+    num_1 + num_2
 }
 
 fn main() Int {
-    let foo = add(15);
+    let foo = 35;
     let bar = 10;
 
-    if foo < 20 {
+    if add(foo, bar) < 40 {
         foo = bar + foo;
     };
 

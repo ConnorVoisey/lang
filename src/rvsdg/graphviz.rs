@@ -4,7 +4,7 @@
 //! Use: `dot -Tpng module.dot -o module.png` or `dot -Tsvg module.dot -o module.svg`
 
 use super::*;
-use crate::{symbols::SymbolTable, types::TypeKind};
+use crate::symbols::SymbolTable;
 use std::fmt::Write;
 
 impl<'a> Module<'a> {
@@ -282,26 +282,7 @@ fn symbol_name(symbol_id: SymbolId, module: &Module, symbols: &SymbolTable) -> S
     interner.resolve(symbol.ident_id).to_string()
 }
 fn type_name(type_id: TypeId, module: &Module) -> String {
-    type_kind_to_name(module.types.kind(type_id), module)
-}
-
-fn type_kind_to_name(type_kind: &TypeKind, module: &Module) -> String {
-    match type_kind {
-        TypeKind::Int => "i32".to_string(),
-        TypeKind::Uint => "u32".to_string(),
-        TypeKind::Bool => "bool".to_string(),
-        TypeKind::Void => "void".to_string(),
-        TypeKind::Str => "str".to_string(),
-        TypeKind::CStr => "cstr".to_string(),
-        TypeKind::Ref(inner) => format!("&{}", type_name(*inner, module)),
-        TypeKind::Struct(id) => format!("S{}", id.0),
-        TypeKind::Fn { .. } => "fn".to_string(),
-        TypeKind::Unknown => "?".to_string(),
-        TypeKind::Var => "T".to_string(),
-        TypeKind::Array { size, inner_type } => {
-            format!("[{}; {}]", type_kind_to_name(inner_type, module), size)
-        }
-    }
+    module.types.id_to_string(type_id)
 }
 
 fn escape_dot(s: &str) -> String {
