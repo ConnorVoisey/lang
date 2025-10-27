@@ -15,6 +15,17 @@ impl Ast {
         cur_token: &Token,
         start_token_at: usize,
     ) -> Option<AstExpr> {
+        debug_assert!(
+            matches!(
+                self.tokens.get(self.curr_token_i()),
+                Some(Token {
+                    kind: TokenKind::IfKeyWord,
+                    ..
+                })
+            ),
+            "Called parse_if_expr not on a `if` keyword, got {:?}",
+            self.tokens.get(self.curr_token_i()),
+        );
         self.next_token();
         let condition = match self.parse_expr(0, symbols, true) {
             Some(c) => c,
@@ -25,6 +36,7 @@ impl Ast {
                 return None;
             }
         };
+        dbg!(&condition);
 
         // expect '{'
         match self.curr_token() {
@@ -67,6 +79,7 @@ impl Ast {
                         }) => {
                             // else if
                             self.next_token(); // consume 'if'
+                            self.next_token(); // consume 'if'
                             match self.parse_expr(0, symbols, true) {
                                 Some(cond) => {
                                     let blk = match self.parse_block(symbols, false) {
@@ -90,6 +103,7 @@ impl Ast {
                         }) => {
                             self.next_token(); // consume peeked '{'
                             unconditional_else = self.parse_block(symbols, false);
+                            break;
                         }
                         _ => {
                             // unexpected token after else — record and stop
@@ -553,7 +567,7 @@ mod test {
 
     #[test]
     fn if_with_struct_field_comparison() {
-        let debug_expr = parse_debug("if Point { x: 1, y: 2 }.x < 5 { 1 };");
+        let debug_expr = parse_debug("if (Point { x: 1, y: 2 }.x < 5) { 1 };");
         let expected = DebugExprKind::Op(Box::new(DebugOp::IfCond {
             condition: DebugExprKind::Op(Box::new(DebugOp::LessThan {
                 left: DebugExprKind::Op(Box::new(DebugOp::Dot {
