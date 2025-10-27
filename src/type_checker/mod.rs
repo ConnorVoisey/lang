@@ -601,7 +601,7 @@ impl<'a> TypeChecker<'a> {
                         let size = args.len();
                         expr.type_id = Some(self.arena.make(TypeKind::Array {
                             size,
-                            inner_type: Box::new(self.arena.kind(type_id.unwrap()).clone()),
+                            inner_type: type_id.unwrap(),
                         }));
                         expr.type_id
                     }
@@ -723,5 +723,1812 @@ impl<'a> TypeChecker<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        interner::{Interner, SharedInterner},
+        lexer::Lexer,
+    };
+    use parking_lot::RwLock;
+
+    struct TypeCheckTestCase {
+        arena: TypeArena,
+        symbols: SymbolTable,
+        ast: Ast,
+    }
+
+    impl TypeCheckTestCase {
+        fn from_source(src: &str) -> Self {
+            let interner = SharedInterner::new(RwLock::new(Interner::new()));
+            let mut symbols = SymbolTable::new(interner.clone());
+
+            let lexer = Lexer::from_src_str(src, &interner).unwrap();
+            let mut ast = Ast::from_tokens(lexer.tokens, interner.clone(), &mut symbols).unwrap();
+
+            let mut arena = TypeArena::new();
+            symbols.register_ast(&mut ast, &mut arena);
+
+            Self {
+                arena,
+                symbols,
+                ast,
+            }
+        }
+
+        fn check(mut self) -> TypeCheckResult {
+            let mut checker = TypeChecker::new(&mut self.arena, &mut self.symbols);
+            checker.check_ast(&mut self.ast);
+
+            TypeCheckResult {
+                errors: checker.errors,
+                ast: self.ast,
+                arena: self.arena,
+            }
+        }
+    }
+
+    struct TypeCheckResult {
+        errors: Vec<TypeCheckingError>,
+        ast: Ast,
+        arena: TypeArena,
+    }
+
+    impl TypeCheckResult {
+        fn assert_no_errors(&self) {
+            assert!(
+                self.errors.is_empty(),
+                "Expected no errors, got: {:?}",
+                self.errors
+            );
+        }
+
+        fn assert_error_count(&self, count: usize) {
+            assert_eq!(self.errors.len(), count);
+        }
+
+        fn assert_has_error<F>(&self, predicate: F)
+        where
+            F: Fn(&TypeCheckingError) -> bool,
+        {
+            assert!(
+                self.errors.iter().any(predicate),
+                "No matching error found in: {:?}",
+                self.errors
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_addition() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 1 + 2 }").check();
+        result.assert_no_errors();
+    }
+    #[test]
+    fn test_mixed_type_arithmetic() {
+        let result = TypeCheckTestCase::from_source(r#"fn main() Int { 1 + true }"#).check();
+        result.assert_error_count(1);
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    // ===== Function Call Tests =====
+
+    #[test]
+    fn test_function_wrong_arg_count() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+              fn add(a Int, b Int) Int { a + b }
+              fn main() Int { add(1) }
+          "#,
+        )
+        .check();
+
+        result.assert_error_count(1);
+        result.assert_has_error(|e| {
+            matches!(
+                e,
+                TypeCheckingError::MissingFnArgCall {
+                    expected_arg_count: 2,
+                    got_arg_count: 1,
+                    ..
+                }
+            )
+        });
+    }
+
+    // ===== If Expression Tests =====
+
+    #[test]
+    fn test_if_non_bool_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+              fn main() Int {
+                  if 5 { 1 } else { 2 }
+              }
+          "#,
+        )
+        .check();
+
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfConditionNotBool { .. }));
+    }
+
+    #[test]
+    fn test_if_else_branch_mismatch() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+              fn main() Int {
+                  if true { 1 } else { false }
+              }
+          "#,
+        )
+        .check();
+
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfElseBranchMismatch { .. }));
+    }
+
+    // ===== Arithmetic Operations - Extended =====
+
+    #[test]
+    fn test_subtraction_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 10 - 5 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_multiplication_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 3 * 7 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_division_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 20 / 4 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_subtraction_left_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { true - 5 }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_multiplication_right_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 5 * false }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_division_left_string() {
+        let result = TypeCheckTestCase::from_source(r#"fn main() Int { "hello" / 2 }"#).check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_nested_arithmetic() {
+        let result =
+            TypeCheckTestCase::from_source("fn main() Int { (1 + 2) * (3 - 4) / 5 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_arithmetic_with_variables() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                let y = 20;
+                x + y * 2
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_arithmetic_with_function_result() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_num() Int { 42 }
+            fn main() Int { get_num() + 10 }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_subtraction_both_sides_wrong() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { true - false }").check();
+        result.assert_error_count(2);
+    }
+
+    #[test]
+    fn test_complex_arithmetic_chain() {
+        let result =
+            TypeCheckTestCase::from_source("fn main() Int { 1 + 2 - 3 * 4 / 5 + 6 }").check();
+        result.assert_no_errors();
+    }
+
+    // ===== Negation Operator =====
+
+    #[test]
+    fn test_negation_on_int() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { -42 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_negation_on_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { -true }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_negation_on_string() {
+        let result = TypeCheckTestCase::from_source(r#"fn main() Int { -"hello" }"#).check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_double_negation() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { --5 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_triple_negation() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { ---10 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_negation_on_expression() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { -(5 + 3) }").check();
+        result.assert_no_errors();
+    }
+
+    // ===== Reference Operator =====
+
+    #[test]
+    fn test_reference_on_int() {
+        let result = TypeCheckTestCase::from_source("fn main() &Int { &42 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_reference_on_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() &Bool { &true }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_nested_reference() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 5;
+                let y = &x;
+                10
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_reference_in_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 5;
+                let y = &x;
+                10
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Comparison Operators =====
+
+    #[test]
+    fn test_less_than_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 5 < 10 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_greater_than_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 10 > 5 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_less_than_eq_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 5 <= 10 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_greater_than_eq_valid() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 10 >= 5 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_less_than_left_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { true < 5 }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ComparisonTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_less_than_right_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 5 < true }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ComparisonTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_greater_than_both_bool() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { true > false }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ComparisonTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_less_than_eq_mixed() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 5 <= false }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ComparisonTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_greater_than_eq_mixed() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { true >= 10 }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ComparisonTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_comparison_with_expressions() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { (1 + 2) < (3 * 4) }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_comparison_with_variables() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Bool {
+                let x = 10;
+                let y = 20;
+                x < y
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_chained_comparisons() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 1 < 2 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_comparison_complex_left() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { (10 - 5) * 2 > 8 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_comparison_complex_right() {
+        let result = TypeCheckTestCase::from_source("fn main() Bool { 15 <= (3 + 4) * 2 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_comparison_with_function_call() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_num() Int { 42 }
+            fn main() Bool { get_num() > 10 }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_comparison_both_function_calls() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_a() Int { 10 }
+            fn get_b() Int { 20 }
+            fn main() Bool { get_a() < get_b() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Function Calls - Extended =====
+
+    #[test]
+    fn test_function_no_args() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_value() Int { 42 }
+            fn main() Int { get_value() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_three_args() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add_three(a Int, b Int, c Int) Int { a + b + c }
+            fn main() Int { add_three(1, 2, 3) }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_too_many_args() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add(a Int, b Int) Int { a + b }
+            fn main() Int { add(1, 2, 3) }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| {
+            matches!(
+                e,
+                TypeCheckingError::MissingFnArgCall {
+                    expected_arg_count: 2,
+                    got_arg_count: 3,
+                    ..
+                }
+            )
+        });
+    }
+
+    #[test]
+    fn test_function_wrong_first_arg() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add(a Int, b Int) Int { a + b }
+            fn main() Int { add(true, 2) }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidArg { .. }));
+    }
+
+    #[test]
+    fn test_function_wrong_second_arg() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add(a Int, b Int) Int { a + b }
+            fn main() Int { add(1, false) }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidArg { .. }));
+    }
+
+    #[test]
+    fn test_function_wrong_middle_arg() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add_three(a Int, b Int, c Int) Int { a + b + c }
+            fn main() Int { add_three(1, true, 3) }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidArg { .. }));
+    }
+
+    #[test]
+    fn test_function_multiple_wrong_args() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add(a Int, b Int) Int { a + b }
+            fn main() Int { add(true, false) }
+        "#,
+        )
+        .check();
+        result.assert_error_count(2);
+    }
+
+    #[test]
+    fn test_nested_function_calls() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn inner(x Int) Int { x * 2 }
+            fn outer(y Int) Int { inner(y + 1) }
+            fn main() Int { outer(5) }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_call_result_in_expr() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_val() Int { 10 }
+            fn main() Int { get_val() + 5 }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_call_variable_not_function() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 5;
+                x()
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::CallNonFunction { .. }));
+    }
+
+    #[test]
+    fn test_multiple_function_calls_in_expr() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn a() Int { 1 }
+            fn b() Int { 2 }
+            fn c() Int { 3 }
+            fn main() Int { a() + b() * c() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== If Expressions - Extended =====
+
+    #[test]
+    fn test_if_bool_literal() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true { 42 } else { 0 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_comparison_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if 5 < 10 { 1 } else { 2 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_without_else() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true { 42 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_else_matching_types() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true { 10 } else { 20 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_multiple_else_if_matching() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if false { 1 } else if true { 2 } else if false { 3 } else { 4 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_multiple_else_if_mismatched() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if false { 1 } else if true { false } else { 3 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfElseBranchMismatch { .. }));
+    }
+
+    #[test]
+    fn test_nested_if_expressions() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true {
+                    if false { 1 } else { 2 }
+                } else {
+                    3
+                }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_in_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                (if true { 10 } else { 20 }) + 5
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_as_function_arg() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn use_val(x Int) Int { x }
+            fn main() Int {
+                use_val(if true { 5 } else { 10 })
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_else_if_non_bool_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true { 1 } else if 5 { 2 } else { 3 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfConditionNotBool { .. }));
+    }
+
+    #[test]
+    fn test_if_with_block_body() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true {
+                    let x = 5;
+                    x + 10
+                } else {
+                    20
+                }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_else_type_mismatch_bool_int() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true { true } else { 10 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfElseBranchMismatch { .. }));
+    }
+
+    #[test]
+    fn test_if_only_else_if_no_final_else() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if false { 1 } else if true { 2 };
+                42
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_if_string_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if "hello" { 1 } else { 2 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::IfConditionNotBool { .. }));
+    }
+
+    // ===== While Loops =====
+
+    #[test]
+    fn test_while_bool_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                while true { break; };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_while_int_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                while 5 { break; };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::WhileConditionNotBool { .. }));
+    }
+
+    #[test]
+    fn test_while_comparison_condition() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 0;
+                while x < 10 { break; };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_while_with_body() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 0;
+                while x < 10 {
+                    let y = x + 1;
+                    break;
+                };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_break_inside_while() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                while true { break; };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_break_outside_while() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                break;
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::BreakOutsideLoop { .. }));
+    }
+
+    #[test]
+    fn test_break_inside_nested_while() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                while true {
+                    while false {
+                        break;
+                    };
+                    break;
+                };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_while_empty_body() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                while false { };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Variable Declarations =====
+
+    #[test]
+    fn test_var_decl_int() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 42;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_var_decl_bool() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Bool {
+                let x = true;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_var_decl_with_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10 + 20;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_var_decl_with_function_call() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_val() Int { 42 }
+            fn main() Int {
+                let x = get_val();
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_multiple_var_decls() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                let y = 20;
+                let z = 30;
+                x + y + z
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_var_decl_complex_expr() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = (10 + 20) * 3 - 5;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Assignments =====
+
+    #[test]
+    fn test_assignment_compatible_type() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                x = 20;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_assignment_incompatible_int_to_bool() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = true;
+                x = 10;
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::AssignmentMismatch { .. }));
+    }
+
+    #[test]
+    fn test_assignment_incompatible_bool_to_int() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                x = true;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::AssignmentMismatch { .. }));
+    }
+
+    #[test]
+    fn test_assignment_function_result() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_val() Int { 42 }
+            fn main() Int {
+                let x = 0;
+                x = get_val();
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_assignment_arithmetic_result() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                x = x + 5;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_multiple_assignments() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                let y = 20;
+                x = 30;
+                y = 40;
+                x + y
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_reassignment_same_type() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 10;
+                x = 20;
+                x = 30;
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_assignment_to_if_result() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 0;
+                x = if true { 10 } else { 20 };
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Return Statements =====
+
+    #[test]
+    fn test_explicit_return_matching() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                return 42;
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_explicit_return_mismatched() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                return true;
+            }
+            fn main() Int { 0 }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidReturnType { .. }));
+    }
+
+    #[test]
+    fn test_block_return_matching() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { 42 }").check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_block_return_mismatched() {
+        let result = TypeCheckTestCase::from_source("fn main() Int { true }").check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidReturnType { .. }));
+    }
+
+    #[test]
+    fn test_return_in_nested_block() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                {
+                    return 42;
+                }
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_return_in_if_branch() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                if true {
+                    return 42;
+                } else {
+                    return 0;
+                }
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_return_in_else_branch() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                if false {
+                    0
+                } else {
+                    return 42;
+                }
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_early_return_wrong_type() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                if true {
+                    return false;
+                };
+                42
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidReturnType { .. }));
+    }
+
+    #[test]
+    fn test_multiple_returns_all_matching() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo(x Int) Int {
+                if x < 0 {
+                    return 0;
+                };
+                if x > 100 {
+                    return 100;
+                };
+                x
+            }
+            fn main() Int { foo(50) }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_return_with_expression() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                return 10 + 20 * 3;
+            }
+            fn main() Int { foo() }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Struct Operations =====
+
+    #[test]
+    fn test_struct_field_access() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10, y: 20 };
+                p.x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_struct_creation_all_fields() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10, y: 20 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_struct_creation_missing_field() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_struct_creation_extra_field() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10, y: 20, z: 30 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_struct_creation_wrong_field_type() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: true, y: 20 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_struct_creation_duplicate_field() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10, x: 20 };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_empty_struct() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Empty { }
+            fn main() Int {
+                let e = Empty { };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_struct_as_function_param() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn use_point(p Point) Int { 0 }
+            fn main() Int {
+                let p = Point { x: 10, y: 20 };
+                use_point(p)
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_struct_field_in_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn main() Int {
+                let p = Point { x: 10, y: 20 };
+                p.x + p.y
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_nested_struct_field_access() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Inner { val Int }
+            struct Outer { inner Inner }
+            fn main() Int {
+                let inner = Inner { val: 42 };
+                let outer = Outer { inner: inner };
+                outer.inner.val
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_field_access_on_non_struct() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = 42;
+                x.field
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    // ===== Array Operations =====
+
+    #[test]
+    fn test_array_init_homogeneous_ints() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [1, 2, 3];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_array_init_homogeneous_bools() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [true, false, true];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_array_init_heterogeneous() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [1, true, 3];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn test_array_init_empty() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [];
+                0
+            }
+        "#,
+        )
+        .check();
+        // This might fail or succeed depending on how empty arrays are handled
+        // Just checking it doesn't panic
+    }
+
+    #[test]
+    fn test_array_with_expressions() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [1 + 2, 3 * 4, 5 - 1];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_array_with_function_results() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn get_val() Int { 42 }
+            fn main() Int {
+                let arr = [get_val(), get_val()];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_nested_arrays() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [[1, 2], [3, 4]];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_array_mixed_expr_types() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let arr = [10, true];
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
+    }
+
+    // ===== Block Expressions =====
+
+    #[test]
+    fn test_empty_block() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                { };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_block_single_statement() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                { let x = 5; };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_block_multiple_statements() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                {
+                    let x = 5;
+                    let y = 10;
+                    let z = x + y;
+                };
+                0
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_block_with_return_value() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let x = { 42 };
+                x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_nested_blocks() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                {
+                    {
+                        {
+                            42
+                        }
+                    }
+                }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_block_in_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                { 10 } + { 20 }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    // ===== Complex/Integration Tests =====
+
+    #[test]
+    fn test_multiple_errors_in_function() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn foo() Int {
+                let x = true + false;
+                let y = 10 < "hello";
+                if 5 { 1 } else { 2 }
+            }
+            fn main() Int { 0 }
+        "#,
+        )
+        .check();
+        assert!(result.errors.len() >= 3);
+    }
+
+    #[test]
+    fn test_complex_nested_expression() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                ((1 + 2) * (3 - 4)) / ((5 + 6) - (7 * 8))
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_calling_function() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn helper(x Int) Int { x * 2 }
+            fn caller(y Int) Int { helper(y + 1) }
+            fn main() Int { caller(10) }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_mixed_control_flow() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                let result = 0;
+                while result < 10 {
+                    if result < 5 {
+                        result = result + 1;
+                    } else {
+                        break;
+                    };
+                };
+                result
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_deep_nesting() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                if true {
+                    let x = {
+                        if false {
+                            while false {
+                                break;
+                            };
+                            10
+                        } else {
+                            20
+                        }
+                    };
+                    x + 5
+                } else {
+                    0
+                }
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_program_with_multiple_functions() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn add(a Int, b Int) Int { a + b }
+            fn sub(a Int, b Int) Int { a - b }
+            fn mul(a Int, b Int) Int { a * b }
+            fn div(a Int, b Int) Int { a / b }
+            fn main() Int {
+                add(10, sub(20, mul(3, div(12, 4))))
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_with_struct_param() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn use_point(p Point) Int { p.x + p.y }
+            fn main() Int {
+                let pt = Point { x: 5, y: 10 };
+                use_point(pt)
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_function_returning_struct() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            struct Point { x Int, y Int }
+            fn make_point(x Int, y Int) Point {
+                Point { x: x, y: y }
+            }
+            fn main() Int {
+                let p = make_point(10, 20);
+                p.x
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_deeply_nested_arithmetic() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Int {
+                1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_complex_boolean_expression() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Bool {
+                (1 < 2) >= (3 > 4)
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
     }
 }

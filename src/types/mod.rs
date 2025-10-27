@@ -21,7 +21,7 @@ pub enum TypeKind {
     Struct(StructId),
     Array {
         size: usize,
-        inner_type: Box<TypeKind>,
+        inner_type: TypeId,
     },
     Fn {
         params: Vec<TypeId>,
@@ -222,7 +222,7 @@ impl TypeArena {
                     size: size_2,
                 },
             ) => {
-                if *inner_type_1 != *inner_type_2 || size_1 != size_2 {
+                if inner_type_1 != inner_type_2 || size_1 != size_2 {
                     return Err(UnifyErrorWithoutSpan::Mismatch(
                         ra,
                         self.kinds[ra.0].clone(),
@@ -254,22 +254,22 @@ impl TypeArena {
         type_id
     }
 
-    pub fn var_type_to_typeid(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeId {
+    pub fn var_type_to_type_kind(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeKind {
         match v {
-            VarType::Void => self.make(TypeKind::Void),
-            VarType::Int => self.make(TypeKind::Int),
-            VarType::Uint => self.make(TypeKind::Uint),
-            VarType::Str => self.make(TypeKind::Str),
-            VarType::CStr => self.make(TypeKind::CStr),
-            VarType::Bool => self.make(TypeKind::Bool),
+            VarType::Void => TypeKind::Void,
+            VarType::Int => TypeKind::Int,
+            VarType::Uint => TypeKind::Uint,
+            VarType::Str => TypeKind::Str,
+            VarType::CStr => TypeKind::CStr,
+            VarType::Bool => TypeKind::Bool,
             VarType::Ref(inner) => {
                 let inner_id = self.var_type_to_typeid(inner, symbols);
-                self.make(TypeKind::Ref(inner_id))
+                TypeKind::Ref(inner_id)
             }
             VarType::Custom((_, symbol_id)) => match symbol_id {
                 Some(symbol_id) => {
                     let symbol = symbols.resolve(*symbol_id);
-                    let kind = match &symbol.kind {
+                    match &symbol.kind {
                         SymbolKind::Fn(_) => TypeKind::Fn {
                             params: todo!(),
                             param_symbols: todo!(),
@@ -278,14 +278,21 @@ impl TypeArena {
                         SymbolKind::FnArg(_) => todo!(),
                         SymbolKind::Var(_) => todo!(),
                         SymbolKind::Struct(struct_data) => TypeKind::Struct(struct_data.struct_id),
-                    };
-                    self.make(kind)
+                    }
                 }
-                None => self.make(TypeKind::Unknown),
+                None => TypeKind::Unknown,
+            },
+            VarType::Array { var_type, count } => TypeKind::Array {
+                size: *count,
+                inner_type: self.var_type_to_typeid(&var_type, symbols),
             },
 
             VarType::CChar => todo!(),
         }
+    }
+    pub fn var_type_to_typeid(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeId {
+        let kind = self.var_type_to_type_kind(v, symbols);
+        self.make(kind)
     }
     pub fn kind_to_string(&self, kind: &TypeKind) -> String {
         match kind {
@@ -297,7 +304,11 @@ impl TypeArena {
             TypeKind::Bool => "Bool".to_string(),
             TypeKind::Struct(struct_id) => format!("Struct {}", struct_id.0),
             TypeKind::Array { size, inner_type } => {
-                format!("[{}; {}]", self.kind_to_string(inner_type), size)
+                format!(
+                    "[{}; {}]",
+                    self.kind_to_string(self.kind(*inner_type)),
+                    size
+                )
             }
             TypeKind::Fn { .. } => "Fn".to_string(),
             TypeKind::Ref(type_id) => format!("&{}", self.kind_to_string(self.kind(*type_id))),
@@ -309,33 +320,6 @@ impl TypeArena {
 
     pub fn id_to_string(&self, type_id: TypeId) -> String {
         self.kind_to_string(self.kind(type_id))
-    }
-    fn type_kind_to_debug_name(&self, kind: &TypeKind) -> String {
-        match kind {
-            TypeKind::Int => "i32".to_string(),
-            TypeKind::Uint => "u32".to_string(),
-            TypeKind::Bool => "bool".to_string(),
-            TypeKind::Void => "void".to_string(),
-            TypeKind::Str => "str".to_string(),
-            TypeKind::CStr => "cstr".to_string(),
-            TypeKind::Ref(inner) => format!("&{}", self.id_to_debug_string(*inner)),
-            TypeKind::Struct(id) => format!("struct#{}", id.0),
-            TypeKind::Fn { params, ret, .. } => {
-                let param_str: Vec<_> =
-                    params.iter().map(|&p| self.id_to_debug_string(p)).collect();
-                format!(
-                    "fn({}) -> {}",
-                    param_str.join(", "),
-                    self.id_to_debug_string(*ret)
-                )
-            }
-            TypeKind::Array { size, inner_type } => {
-                format!("[{}; {}]", self.type_kind_to_debug_name(inner_type), size)
-            }
-            TypeKind::Unknown => "?".to_string(),
-            TypeKind::Var => "T".to_string(),
-            TypeKind::State => "State".to_string(),
-        }
     }
     pub fn id_to_debug_string(&self, type_id: TypeId) -> String {
         self.kind_to_string(self.kind(type_id))

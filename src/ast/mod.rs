@@ -22,6 +22,10 @@ pub enum VarType {
     Str,
     CStr,
     CChar,
+    Array {
+        var_type: Box<VarType>,
+        count: usize,
+    },
     Custom((IdentId, Option<SymbolId>)),
     Ref(Box<VarType>),
 }
@@ -150,6 +154,52 @@ impl Ast {
     fn parse_var_type(&mut self) -> (VarType, Span) {
         match self.next_token() {
             Some(Token {
+                kind: TokenKind::SquareBracketOpen,
+                span,
+            }) => {
+                let span_cloned = span.clone();
+                let (inner_type, inner_span) = self.parse_var_type();
+
+                if let Some(Token {
+                    kind: TokenKind::SemiColon,
+                    ..
+                }) = self.peek_token()
+                {
+                } else {
+                    todo!("add diagnostics, expected semi colon after [expr")
+                }
+                self.next_token();
+
+                let count = if let Some(Token {
+                    kind: TokenKind::Int(int_val),
+                    ..
+                }) = self.next_token()
+                {
+                    int_val.clone()
+                } else {
+                    todo!("add diagnostics, expected int after [I32;")
+                };
+
+                if let Some(Token {
+                    kind: TokenKind::SquareBracketClose,
+                    ..
+                }) = self.next_token()
+                {
+                } else {
+                    todo!("add diagnostics, expected ] after [I32; 5")
+                };
+                (
+                    VarType::Array {
+                        var_type: Box::new(inner_type),
+                        count: count as usize,
+                    },
+                    Span {
+                        start: span_cloned.start,
+                        end: inner_span.end,
+                    },
+                )
+            }
+            Some(Token {
                 kind: TokenKind::Amp,
                 span,
             }) => {
@@ -157,7 +207,7 @@ impl Ast {
                 let (inner_type, inner_span) = self.parse_var_type();
                 (
                     VarType::Ref(Box::new(inner_type)),
-                    crate::lexer::Span {
+                    Span {
                         start: span_cloned.start,
                         end: inner_span.end,
                     },

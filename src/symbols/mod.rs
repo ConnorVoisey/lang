@@ -6,7 +6,6 @@ use crate::{
         ast_fn::AstFunc,
         ast_struct::AstStruct,
     },
-    // cl_export::cl_vals::CraneliftId,
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
@@ -144,6 +143,9 @@ impl SymbolTable {
             VarType::Custom((ident_id, symbol_id_opt)) => {
                 *symbol_id_opt = self.lookup(*ident_id);
             }
+            VarType::Array { var_type, .. } => {
+                self.resolve_var_type_symbols(&mut *var_type);
+            }
             VarType::Ref(inner) => {
                 self.resolve_var_type_symbols(inner);
             }
@@ -227,18 +229,11 @@ impl SymbolTable {
         // Compute the TypeKind for the function return type.
         // This may call self.lookup(...) which requires &mut self, but that's okay because we don't
         // hold any mutable borrows to a particular symbol right now.
-        let type_kind = match &mut func.return_type {
-            VarType::Void => todo!(),
-            VarType::Int => TypeKind::Int,
-            VarType::Bool => TypeKind::Bool,
-            VarType::Uint => TypeKind::Uint,
-            VarType::Str => TypeKind::Str,
-            VarType::CStr => TypeKind::CStr,
-            VarType::CChar => todo!(),
+        let return_t = match &mut func.return_type {
             VarType::Custom((ident_id, symbol_id_opt)) => {
                 // fill symbol_id_opt by looking it up in the current scopes
                 *symbol_id_opt = self.lookup(*ident_id);
-                match symbol_id_opt {
+                let kind = match symbol_id_opt {
                     Some(symbol_id) => {
                         let symbol = self.resolve(*symbol_id);
                         match &symbol.kind {
@@ -257,13 +252,11 @@ impl SymbolTable {
                         // "CChar" => TypeKind::CChar,
                         _ => TypeKind::Unknown,
                     },
-                }
+                };
+                types.make(kind)
             }
-            VarType::Ref(_var_type) => todo!(),
+            _ => types.var_type_to_typeid(&func.return_type, self),
         };
-
-        // allocate the type for the return type
-        let return_t = types.make(type_kind);
 
         // allocte fn params
         let mut params = vec![];
@@ -425,6 +418,10 @@ impl ToTypeKind for VarType {
             VarType::CChar => todo!(),
             VarType::Custom(_) => todo!(),
             VarType::Ref(var_type) => TypeKind::Ref(types.var_type_to_typeid(var_type, symbols)),
+            VarType::Array { var_type, count } => TypeKind::Array {
+                size: *count,
+                inner_type: types.var_type_to_typeid(&var_type, symbols),
+            },
         }
     }
 }

@@ -36,7 +36,6 @@ impl Ast {
                 return None;
             }
         };
-        dbg!(&condition);
 
         // expect '{'
         match self.curr_token() {
