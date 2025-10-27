@@ -507,7 +507,9 @@ fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::ast_expr::debug::{DebugAtom, DebugExprKind, DebugOp, parse_debug};
+    use crate::ast::ast_expr::debug::{
+        DebugAtom, DebugExprKind, DebugOp, DebugStatement, parse_debug,
+    };
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -901,6 +903,532 @@ mod test {
                 right: DebugExprKind::Atom(DebugAtom::Int(2)),
             })),
             right: DebugExprKind::Atom(DebugAtom::Int(10)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Associativity Edge Cases =====
+
+    #[test]
+    fn subtraction_left_assoc() {
+        // Subtraction is left-associative: 10 - 5 - 2 = (10 - 5) - 2 = 3
+        let debug_expr = parse_debug("10 - 5 - 2;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Minus {
+            left: DebugExprKind::Op(Box::new(DebugOp::Minus {
+                left: DebugExprKind::Atom(DebugAtom::Int(10)),
+                right: DebugExprKind::Atom(DebugAtom::Int(5)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(2)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn division_left_assoc() {
+        // Division is left-associative: 100 / 10 / 2 = (100 / 10) / 2 = 5
+        let debug_expr = parse_debug("100 / 10 / 2;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Divide {
+            left: DebugExprKind::Op(Box::new(DebugOp::Divide {
+                left: DebugExprKind::Atom(DebugAtom::Int(100)),
+                right: DebugExprKind::Atom(DebugAtom::Int(10)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(2)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn mixed_add_sub_left_assoc() {
+        // Mixed addition and subtraction: 10 + 5 - 3 + 1 = ((10 + 5) - 3) + 1
+        let debug_expr = parse_debug("10 + 5 - 3 + 1;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
+            left: DebugExprKind::Op(Box::new(DebugOp::Minus {
+                left: DebugExprKind::Op(Box::new(DebugOp::Add {
+                    left: DebugExprKind::Atom(DebugAtom::Int(10)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(5)),
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Int(3)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(1)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn mixed_mul_div_left_assoc() {
+        // Mixed multiplication and division: 20 * 3 / 4 * 2 = ((20 * 3) / 4) * 2
+        let debug_expr = parse_debug("20 * 3 / 4 * 2;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Multiply {
+            left: DebugExprKind::Op(Box::new(DebugOp::Divide {
+                left: DebugExprKind::Op(Box::new(DebugOp::Multiply {
+                    left: DebugExprKind::Atom(DebugAtom::Int(20)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(3)),
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Int(4)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(2)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Prefix Operator Edge Cases =====
+
+    #[test]
+    fn double_negation_in_expression() {
+        // Double negation in addition: --5 + 3
+        let debug_expr = parse_debug("--5 + 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
+            left: DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Op(Box::new(
+                DebugOp::Neg(DebugExprKind::Atom(DebugAtom::Int(5))),
+            ))))),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn negation_of_negation_multiply() {
+        // Negation in multiplication: -2 * -3 = (-2) * (-3)
+        let debug_expr = parse_debug("-2 * -3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Multiply {
+            left: DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Atom(DebugAtom::Int(
+                2,
+            ))))),
+            right: DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Atom(DebugAtom::Int(
+                3,
+            ))))),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn reference_of_negation() {
+        // Reference of negation: &-x = &(-x)
+        let debug_expr = parse_debug("&-x;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Ref(DebugExprKind::Op(Box::new(
+            DebugOp::Neg(DebugExprKind::Atom(DebugAtom::Ident("x".to_string()))),
+        )))));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn negation_of_reference() {
+        // Negation of reference: -&x = -(&x)
+        // Note: & has same precedence as -, so this parses right-to-left
+        let debug_expr = parse_debug("-&x;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Op(Box::new(
+            DebugOp::Ref(DebugExprKind::Atom(DebugAtom::Ident("x".to_string()))),
+        )))));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn reference_in_arithmetic() {
+        let debug_expr = parse_debug("&x + &y;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
+            left: DebugExprKind::Op(Box::new(DebugOp::Ref(DebugExprKind::Atom(
+                DebugAtom::Ident("x".to_string()),
+            )))),
+            right: DebugExprKind::Op(Box::new(DebugOp::Ref(DebugExprKind::Atom(
+                DebugAtom::Ident("y".to_string()),
+            )))),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn reference_of_expression() {
+        let debug_expr = parse_debug("&(x + y);");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Ref(DebugExprKind::Op(Box::new(
+            DebugOp::Add {
+                left: DebugExprKind::Atom(DebugAtom::Ident("x".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Ident("y".to_string())),
+            },
+        )))));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn triple_negation() {
+        let debug_expr = parse_debug("---x;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Op(Box::new(
+            DebugOp::Neg(DebugExprKind::Op(Box::new(DebugOp::Neg(
+                DebugExprKind::Atom(DebugAtom::Ident("x".to_string())),
+            )))),
+        )))));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Atomic/Minimal Expression Tests =====
+
+    #[test]
+    fn just_integer() {
+        let debug_expr = parse_debug("42;");
+        let expected = DebugExprKind::Atom(DebugAtom::Int(42));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn just_identifier() {
+        let debug_expr = parse_debug("foo;");
+        let expected = DebugExprKind::Atom(DebugAtom::Ident("foo".to_string()));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn just_true() {
+        let debug_expr = parse_debug("true;");
+        let expected = DebugExprKind::Atom(DebugAtom::Bool(true));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn just_false() {
+        let debug_expr = parse_debug("false;");
+        let expected = DebugExprKind::Atom(DebugAtom::Bool(false));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Complex Postfix Chains =====
+
+    #[test]
+    fn complex_postfix_chain() {
+        let debug_expr = parse_debug("obj.method()[0].field(arg);");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
+            ident: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+                    left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                        ident: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                            left: DebugExprKind::Atom(DebugAtom::Ident("obj".to_string())),
+                            right: DebugExprKind::Atom(DebugAtom::Ident("method".to_string())),
+                        })),
+                        args: vec![],
+                    })),
+                    args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Ident("field".to_string())),
+            })),
+            args: vec![DebugExprKind::Atom(DebugAtom::Ident("arg".to_string()))],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn array_of_function_results() {
+        let debug_expr = parse_debug("get_arr()[0][1];");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+            left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+                left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                    ident: DebugExprKind::Atom(DebugAtom::Ident("get_arr".to_string())),
+                    args: vec![],
+                })),
+                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            })),
+            args: vec![DebugExprKind::Atom(DebugAtom::Int(1))],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn deeply_nested_field_access() {
+        let debug_expr = parse_debug("a.b.c.d.e.f;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Dot {
+            left: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                left: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                    left: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                        left: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                            left: DebugExprKind::Atom(DebugAtom::Ident("a".to_string())),
+                            right: DebugExprKind::Atom(DebugAtom::Ident("b".to_string())),
+                        })),
+                        right: DebugExprKind::Atom(DebugAtom::Ident("c".to_string())),
+                    })),
+                    right: DebugExprKind::Atom(DebugAtom::Ident("d".to_string())),
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Ident("e".to_string())),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Ident("f".to_string())),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Parentheses Edge Cases =====
+
+    #[test]
+    fn deeply_nested_parens() {
+        let debug_expr = parse_debug("((((5))));");
+        let expected = DebugExprKind::Atom(DebugAtom::Int(5));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn parens_override_precedence() {
+        // Parentheses override precedence: (1 + 2) * 3 = 9 (not 7)
+        let debug_expr = parse_debug("(1 + 2) * 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Multiply {
+            left: DebugExprKind::Op(Box::new(DebugOp::Add {
+                left: DebugExprKind::Atom(DebugAtom::Int(1)),
+                right: DebugExprKind::Atom(DebugAtom::Int(2)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn parens_with_division() {
+        // Parentheses changing associativity: 100 / (10 / 2) = 20 (not 5)
+        let debug_expr = parse_debug("100 / (10 / 2);");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Divide {
+            left: DebugExprKind::Atom(DebugAtom::Int(100)),
+            right: DebugExprKind::Op(Box::new(DebugOp::Divide {
+                left: DebugExprKind::Atom(DebugAtom::Int(10)),
+                right: DebugExprKind::Atom(DebugAtom::Int(2)),
+            })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn complex_parens_with_multiple_operators() {
+        let debug_expr = parse_debug("((1 + 2) * (3 + 4)) / ((5 - 2) + 1);");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Divide {
+            left: DebugExprKind::Op(Box::new(DebugOp::Multiply {
+                left: DebugExprKind::Op(Box::new(DebugOp::Add {
+                    left: DebugExprKind::Atom(DebugAtom::Int(1)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(2)),
+                })),
+                right: DebugExprKind::Op(Box::new(DebugOp::Add {
+                    left: DebugExprKind::Atom(DebugAtom::Int(3)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(4)),
+                })),
+            })),
+            right: DebugExprKind::Op(Box::new(DebugOp::Add {
+                left: DebugExprKind::Op(Box::new(DebugOp::Minus {
+                    left: DebugExprKind::Atom(DebugAtom::Int(5)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(2)),
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Int(1)),
+            })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Greater Than Operator Edge Cases =====
+
+    #[test]
+    fn greater_than_basic() {
+        let debug_expr = parse_debug("10 > 5;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::GreaterThan {
+            left: DebugExprKind::Atom(DebugAtom::Int(10)),
+            right: DebugExprKind::Atom(DebugAtom::Int(5)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn greater_than_eq_basic() {
+        let debug_expr = parse_debug("10 >= 5;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::GreaterThanEq {
+            left: DebugExprKind::Atom(DebugAtom::Int(10)),
+            right: DebugExprKind::Atom(DebugAtom::Int(5)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn chained_greater_than() {
+        // Chained: 10 > 5 > 2 = (10 > 5) > 2
+        let debug_expr = parse_debug("10 > 5 > 2;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::GreaterThan {
+            left: DebugExprKind::Op(Box::new(DebugOp::GreaterThan {
+                left: DebugExprKind::Atom(DebugAtom::Int(10)),
+                right: DebugExprKind::Atom(DebugAtom::Int(5)),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(2)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn greater_than_with_arithmetic() {
+        let debug_expr = parse_debug("x * 2 > y + 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::GreaterThan {
+            left: DebugExprKind::Op(Box::new(DebugOp::Multiply {
+                left: DebugExprKind::Atom(DebugAtom::Ident("x".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Int(2)),
+            })),
+            right: DebugExprKind::Op(Box::new(DebugOp::Add {
+                left: DebugExprKind::Atom(DebugAtom::Ident("y".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Int(3)),
+            })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Complex Mixed Operator Tests =====
+
+    #[test]
+    fn all_binary_operators_mixed() {
+        // Mix all operators: 1 + 2 * 3 < 4 - 5 / 6
+        // Should parse as: (1 + (2 * 3)) < (4 - (5 / 6))
+        let debug_expr = parse_debug("1 + 2 * 3 < 4 - 5 / 6;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::LessThan {
+            left: DebugExprKind::Op(Box::new(DebugOp::Add {
+                left: DebugExprKind::Atom(DebugAtom::Int(1)),
+                right: DebugExprKind::Op(Box::new(DebugOp::Multiply {
+                    left: DebugExprKind::Atom(DebugAtom::Int(2)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(3)),
+                })),
+            })),
+            right: DebugExprKind::Op(Box::new(DebugOp::Minus {
+                left: DebugExprKind::Atom(DebugAtom::Int(4)),
+                right: DebugExprKind::Op(Box::new(DebugOp::Divide {
+                    left: DebugExprKind::Atom(DebugAtom::Int(5)),
+                    right: DebugExprKind::Atom(DebugAtom::Int(6)),
+                })),
+            })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn prefix_and_postfix_together() {
+        // Prefix negation with postfix operations: -foo().bar[0]
+        let debug_expr = parse_debug("-foo().bar[0];");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Op(Box::new(
+            DebugOp::ArrayAccess {
+                left: DebugExprKind::Op(Box::new(DebugOp::Dot {
+                    left: DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                        ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
+                        args: vec![],
+                    })),
+                    right: DebugExprKind::Atom(DebugAtom::Ident("bar".to_string())),
+                })),
+                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            },
+        )))));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn comparison_of_comparisons() {
+        let debug_expr = parse_debug("(x < y) > (a < b);");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::GreaterThan {
+            left: DebugExprKind::Op(Box::new(DebugOp::LessThan {
+                left: DebugExprKind::Atom(DebugAtom::Ident("x".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Ident("y".to_string())),
+            })),
+            right: DebugExprKind::Op(Box::new(DebugOp::LessThan {
+                left: DebugExprKind::Atom(DebugAtom::Ident("a".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Ident("b".to_string())),
+            })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Function Call Edge Cases =====
+
+    #[test]
+    fn empty_function_call() {
+        let debug_expr = parse_debug("foo();");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
+            args: vec![],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn function_with_complex_args() {
+        // Function call with complex expressions: foo(a + b, c * d, e())
+        let debug_expr = parse_debug("foo(a + b, c * d, e());");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
+            args: vec![
+                DebugExprKind::Op(Box::new(DebugOp::Add {
+                    left: DebugExprKind::Atom(DebugAtom::Ident("a".to_string())),
+                    right: DebugExprKind::Atom(DebugAtom::Ident("b".to_string())),
+                })),
+                DebugExprKind::Op(Box::new(DebugOp::Multiply {
+                    left: DebugExprKind::Atom(DebugAtom::Ident("c".to_string())),
+                    right: DebugExprKind::Atom(DebugAtom::Ident("d".to_string())),
+                })),
+                DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                    ident: DebugExprKind::Atom(DebugAtom::Ident("e".to_string())),
+                    args: vec![],
+                })),
+            ],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn deeply_nested_function_calls() {
+        let debug_expr = parse_debug("a(b(c(d())));");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("a".to_string())),
+            args: vec![DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                ident: DebugExprKind::Atom(DebugAtom::Ident("b".to_string())),
+                args: vec![DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                    ident: DebugExprKind::Atom(DebugAtom::Ident("c".to_string())),
+                    args: vec![DebugExprKind::Op(Box::new(DebugOp::FnCall {
+                        ident: DebugExprKind::Atom(DebugAtom::Ident("d".to_string())),
+                        args: vec![],
+                    }))],
+                }))],
+            }))],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Block Expression Edge Cases =====
+
+    #[test]
+    fn block_in_arithmetic() {
+        let debug_expr = parse_debug("{ 5 } + 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
+            left: DebugExprKind::Op(Box::new(DebugOp::Block {
+                statements: vec![DebugStatement::BlockReturn {
+                    expr: DebugExprKind::Atom(DebugAtom::Int(5)),
+                    is_fn_return: false,
+                }],
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn nested_blocks() {
+        let debug_expr = parse_debug("{ { 42 } };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Block {
+            statements: vec![DebugStatement::BlockReturn {
+                expr: DebugExprKind::Op(Box::new(DebugOp::Block {
+                    statements: vec![DebugStatement::BlockReturn {
+                        expr: DebugExprKind::Atom(DebugAtom::Int(42)),
+                        is_fn_return: false,
+                    }],
+                })),
+                is_fn_return: false,
+            }],
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn block_as_function_argument() {
+        let debug_expr = parse_debug("foo({ 1 + 2 });");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::FnCall {
+            ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
+            args: vec![DebugExprKind::Op(Box::new(DebugOp::Block {
+                statements: vec![DebugStatement::BlockReturn {
+                    expr: DebugExprKind::Op(Box::new(DebugOp::Add {
+                        left: DebugExprKind::Atom(DebugAtom::Int(1)),
+                        right: DebugExprKind::Atom(DebugAtom::Int(2)),
+                    })),
+                    is_fn_return: false,
+                }],
+            }))],
         }));
         assert_eq!(debug_expr, expected);
     }
