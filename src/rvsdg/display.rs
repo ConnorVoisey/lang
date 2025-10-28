@@ -100,9 +100,9 @@ impl Node {
         write!(out, "{}", ind)?;
 
         if !self.output_types.is_empty() {
-            write!(out, "v{}", self.id.0)?;
+            write!(out, "{}", value_name(func, self.id, 0))?;
             for i in 1..self.output_types.len() {
-                write!(out, ", v{}_{}", self.id.0, i)?;
+                write!(out, ", {}", value_name(func, self.id, i))?;
             }
             write!(out, " = ")?;
         }
@@ -117,7 +117,7 @@ impl Node {
 
             NodeKind::Gamma { regions } => {
                 write!(out, "gamma ")?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out, " {{")?;
 
                 for (i, &region_id) in regions.iter().enumerate() {
@@ -145,7 +145,7 @@ impl Node {
 
             NodeKind::Theta { region } => {
                 write!(out, "theta ")?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out, " region:{} {{", region.0)?;
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
@@ -191,55 +191,65 @@ impl Node {
 
             NodeKind::Binary { op } => {
                 write!(out, "{:?} ", op)?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::Unary { op } => {
                 write!(out, "{:?} ", op)?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::Call { function } => {
-                write!(out, "call @func{} ", function.0)?;
-                self.display_inputs(out)?;
+                // Get the function name from the module
+                let func_name = if let Some(f) = module.functions.iter().find(|f| f.id == *function)
+                {
+                    symbol_name(f.name, module, symbols)
+                } else if let Some(ext) = module.extern_functions.iter().find(|f| f.id == *function)
+                {
+                    symbol_name(ext.name, module, symbols)
+                } else {
+                    format!("func{}", function.0)
+                };
+                write!(out, "call {} [id:{}] ", func_name, function.0)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::Alloc { ty } => {
                 write!(out, "alloc {} ", type_name(*ty, module))?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::Load { ty } => {
                 write!(out, "load {} ", type_name(*ty, module))?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::Store { ty } => {
                 write!(out, "store {} ", type_name(*ty, module))?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::StructFieldAddr { field } => {
                 write!(out, "struct_field_addr .field{} ", field.0)?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::StructFieldLoad { field } => {
                 write!(out, "struct_field_load .field{} ", field.0)?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
             NodeKind::StructFieldStore { field } => {
                 write!(out, "struct_field_store .field{} ", field.0)?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
 
@@ -249,7 +259,7 @@ impl Node {
 
             NodeKind::RegionResult => {
                 write!(out, "region_result ")?;
-                self.display_inputs(out)?;
+                self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
         }
@@ -257,23 +267,72 @@ impl Node {
         Ok(())
     }
 
-    fn display_inputs(&self, out: &mut String) -> fmt::Result {
+    fn display_inputs(&self, out: &mut String, func: &Function) -> fmt::Result {
         write!(out, "(")?;
         for (i, input) in self.inputs.iter().enumerate() {
             if i > 0 {
                 write!(out, ", ")?;
             }
-            if input.output_index == 0 {
-                write!(out, "v{}", input.node.0)?;
-            } else {
-                write!(out, "v{}_{}", input.node.0, input.output_index)?;
-            }
+            write!(
+                out,
+                "{}",
+                value_name(func, input.node, input.output_index as usize)
+            )?;
         }
         write!(out, ")")
     }
 }
 
 // Helper functions
+
+/// Generate a value name with type prefix based on node kind
+fn value_name(func: &Function, node_id: NodeId, output_index: usize) -> String {
+    let node = func.node(node_id);
+    let id = node_id.0;
+
+    let prefix = match &node.kind {
+        NodeKind::StateToken => "s",
+        NodeKind::Lambda { .. } => "lam",
+        NodeKind::Gamma { .. } => "g",
+        NodeKind::Theta { .. } => "th",
+        NodeKind::Parameter { .. } => "p",
+        NodeKind::Const { .. } => "c",
+        NodeKind::Binary { op } => match op {
+            BinaryOp::Add => "add",
+            BinaryOp::Sub => "sub",
+            BinaryOp::Mul => "mul",
+            BinaryOp::Div => "div",
+            BinaryOp::Rem => "rem",
+            BinaryOp::Eq => "eq",
+            BinaryOp::Ne => "ne",
+            BinaryOp::Lt => "lt",
+            BinaryOp::Le => "le",
+            BinaryOp::Gt => "gt",
+            BinaryOp::Ge => "ge",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+        },
+        NodeKind::Unary { op } => match op {
+            UnaryOp::Neg => "neg",
+            UnaryOp::Not => "not",
+        },
+        NodeKind::Call { .. } => "call",
+        NodeKind::Alloc { .. } => "alloc",
+        NodeKind::Load { .. } => "load",
+        NodeKind::Store { .. } => "store",
+        NodeKind::StructFieldAddr { .. } => "faddr",
+        NodeKind::StructFieldLoad { .. } => "fload",
+        NodeKind::StructFieldStore { .. } => "fstore",
+        NodeKind::RegionParam { .. } => "rp",
+        NodeKind::RegionResult => "rr",
+    };
+
+    if output_index == 0 {
+        format!("{}{}", prefix, id)
+    } else {
+        format!("{}{}_{}", prefix, id, output_index)
+    }
+}
 
 /// Display the contents of a region
 fn display_region(

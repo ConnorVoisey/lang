@@ -484,6 +484,21 @@ mod test {
         assert_eq!(debug_expr, expected);
     }
 
+    #[test]
+    fn if_with_eq() {
+        let debug_expr = parse_debug("if read_amount == buffer_size { break; };");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::IfCond {
+            condition: DebugExprKind::Op(Box::new(DebugOp::Equivalent {
+                left: DebugExprKind::Atom(DebugAtom::Ident("read_amount".to_string())),
+                right: DebugExprKind::Atom(DebugAtom::Ident("buffer_size".to_string())),
+            })),
+            block: vec![DebugStatement::Break],
+            else_ifs: vec![],
+            unconditional_else: None,
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
     // ===== Edge Case: Array Literal in Condition =====
 
     #[test]

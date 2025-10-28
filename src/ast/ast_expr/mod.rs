@@ -395,6 +395,14 @@ impl Ast {
                             type_id: None,
                         }),
                     },
+                    TokenKind::Equivalent => Op::Equivalent {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
                     TokenKind::LessThan => Op::LessThan {
                         left: lhs?,
                         right: rhs.unwrap_or(AstExpr {
@@ -486,6 +494,7 @@ fn postfix_binding_power(op_token: &TokenKind) -> Option<(u8, ())> {
 
 fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
     match op_token {
+        TokenKind::Equivalent => Some((1, 2)),
         // Comparison operators - all at the same precedence level
         TokenKind::LessThan
         | TokenKind::LessThanEq

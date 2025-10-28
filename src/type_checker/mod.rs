@@ -513,7 +513,8 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = if_block_return_id;
                         if_block_return_id
                     }
-                    Op::LessThan { left, right }
+                    Op::Equivalent { left, right }
+                    | Op::LessThan { left, right }
                     | Op::LessThanEq { left, right }
                     | Op::GreaterThan { left, right }
                     | Op::GreaterThanEq { left, right } => {
@@ -574,7 +575,6 @@ impl<'a> TypeChecker<'a> {
                         type_id
                     }
 
-                    Op::Equivalent { left: _, right: _ } => todo!(),
                     Op::ArrayAccess { left: _, args: _ } => todo!(),
                     Op::ArrayInit { args } => {
                         // all elements within the array init must have the same type
