@@ -54,6 +54,7 @@ impl<'a> AstLowering<'a> {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn lower_module(mut self) -> Module<'a> {
         let mut module = Module::new(self.types, self.interner.clone());
         // First register all functions
@@ -89,6 +90,7 @@ impl<'a> AstLowering<'a> {
         module
     }
 
+    #[tracing::instrument(skip(self, ast_fn, func_id))]
     fn lower_extern_function(&self, ast_fn: &AstFunc, func_id: FunctionId) -> ExternFunction {
         let symbol = self.symbols.resolve(ast_fn.symbol_id);
         let (param_types, return_type) = match &symbol.kind {
@@ -117,6 +119,7 @@ impl<'a> AstLowering<'a> {
         }
     }
 
+    #[tracing::instrument(skip(self, ast_fn, func_id))]
     fn lower_function(&mut self, ast_fn: &AstFunc, func_id: FunctionId) -> Function {
         let symbol = self.symbols.resolve(ast_fn.symbol_id);
         let return_type = match &symbol.kind {

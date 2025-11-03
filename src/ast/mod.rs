@@ -1,3 +1,5 @@
+use tracing::instrument;
+
 use crate::{
     ast::{ast_fn::AstFunc, ast_struct::AstStruct, error::AstParseError},
     error::CompliationError,
@@ -69,6 +71,7 @@ impl Ast {
         }
     }
 
+    #[tracing::instrument(skip(self, symbols))]
     fn parse_extern_block(&mut self, symbols: &mut SymbolTable) {
         debug_assert!(
             matches!(
@@ -239,6 +242,7 @@ impl Ast {
         }
     }
 
+    #[tracing::instrument(skip(tokens, interner, symbols))]
     pub fn from_tokens(
         tokens: Vec<Token>,
         interner: SharedInterner,

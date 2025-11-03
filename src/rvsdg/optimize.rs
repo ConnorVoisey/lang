@@ -12,6 +12,7 @@ use rustc_hash::FxHashSet;
 /// Uses mark-and-sweep algorithm:
 /// 1. Mark all nodes reachable from RegionResults and nodes with observable effects
 /// 2. Sweep unmarked nodes from all regions
+#[tracing::instrument(skip(func))]
 pub fn dead_code_elimination(func: &mut Function) {
     let live_nodes = mark_live_nodes(func);
     sweep_dead_nodes(func, &live_nodes);

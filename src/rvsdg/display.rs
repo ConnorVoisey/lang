@@ -9,6 +9,7 @@ use std::fmt::{self, Write};
 
 impl<'a> Module<'a> {
     /// Format the entire module as text
+    #[tracing::instrument(skip(self, symbols))]
     pub fn display(&self, symbols: &SymbolTable) -> String {
         let mut out = String::new();
 

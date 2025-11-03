@@ -9,12 +9,18 @@ use crate::{
     type_checker::TypeChecker,
     types::TypeArena,
 };
+use cranelift_codegen::{
+    isa,
+    settings::{self, Configurable},
+};
+use cranelift_object::{ObjectBuilder, ObjectModule};
 use std::{
     fs::{self, File, read_to_string},
     path::PathBuf,
     process::Command,
 };
 use target_lexicon::Triple;
+use tracing::{Level, info, span};
 
 pub mod ast;
 pub mod error;
@@ -30,6 +36,7 @@ pub mod types;
 pub struct ModParser {}
 
 /// Configuration for the compiler pipeline
+#[derive(Debug)]
 pub struct CompilerConfig {
     /// Use RVSDG IR layer (true) or go directly to Cranelift (false)
     pub use_rvsdg: bool,
@@ -57,11 +64,13 @@ impl ModParser {
         Self::parse_file_with_config(file_path, interner, CompilerConfig::default())
     }
 
+    #[tracing::instrument(skip(interner, config))]
     pub fn parse_file_with_config(
         file_path: &str,
         interner: &SharedInterner,
         config: CompilerConfig,
     ) -> Result<ModParser, CompliationError> {
+        info!("started compile file {file_path}");
         let src = match read_to_string(file_path) {
             Ok(v) => v,
             Err(e) => return Err(CompliationError::LexingError(vec![e.into()])),
@@ -70,25 +79,37 @@ impl ModParser {
         if !lexer.errs.is_empty() {
             return Err(CompliationError::LexingError(lexer.errs));
         }
+
         let mut symbols = SymbolTable::new(interner.clone());
-        let mut ast = Ast::from_tokens(lexer.tokens, interner.clone(), &mut symbols)?;
+        let mut ast = {
+            let _span = span!(Level::INFO, "parse_ast").entered();
+            Ast::from_tokens(lexer.tokens, interner.clone(), &mut symbols)?
+        };
         if !ast.errs.is_empty() {
             return Err(CompliationError::AstParseError(ast.errs));
         }
+
         // dbg!(&ast);
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 
-        let mut type_checker = TypeChecker::new(&mut type_arena, &mut symbols);
-        type_checker.check_ast(&mut ast);
-        if !type_checker.errors.is_empty() {
-            return Err(CompliationError::TypeCheckingError(type_checker.errors));
+        {
+            let _span = span!(Level::INFO, "type_checking").entered();
+            let mut type_checker = TypeChecker::new(&mut type_arena, &mut symbols);
+            type_checker.check_ast(&mut ast);
+            if !type_checker.errors.is_empty() {
+                return Err(CompliationError::TypeCheckingError(type_checker.errors));
+            }
         }
+
         let struct_layouts = StructLayoutInfo::new(&type_arena).compute_struct_layout();
 
         // RVSDG pipeline: AST -> RVSDG -> Cranelift
-        let lowering = AstLowering::new(&ast, &type_arena, &symbols, interner.clone());
-        let rvsdg_module = lowering.lower_module();
+        let rvsdg_module = {
+            let _span = span!(Level::INFO, "rvsdg_lowering").entered();
+            let lowering = AstLowering::new(&ast, &type_arena, &symbols, interner.clone());
+            lowering.lower_module()
+        };
 
         println!(
             "RVSDG module created with {} functions",
@@ -97,6 +118,7 @@ impl ModParser {
 
         // Dump RVSDG if requested
         if config.dump_rvsdg {
+            let _span = span!(Level::INFO, "dumping rvsdg").entered();
             use std::fs;
             use std::io::Write;
 
@@ -119,13 +141,6 @@ impl ModParser {
             }
         }
 
-        // Create Cranelift object module (matching cl_export settings)
-        use cranelift_codegen::{
-            isa,
-            settings::{self, Configurable},
-        };
-        use cranelift_object::{ObjectBuilder, ObjectModule};
-
         let mut shared_builder = settings::builder();
         shared_builder.enable("is_pic").unwrap();
         shared_builder.set("opt_level", "speed").unwrap();
@@ -140,10 +155,13 @@ impl ModParser {
         let mut cl_module = ObjectModule::new(obj_builder);
 
         // Compile RVSDG to Cranelift
-        let rvsdg_to_cl = RvsdgToCranelift::new(&rvsdg_module, &symbols, &struct_layouts);
-        rvsdg_to_cl
-            .compile(&mut cl_module, call_conv)
-            .expect("RVSDG to Cranelift compilation failed");
+        {
+            let _span = span!(Level::INFO, "cranelift_compilation").entered();
+            let rvsdg_to_cl = RvsdgToCranelift::new(&rvsdg_module, &symbols, &struct_layouts);
+            rvsdg_to_cl
+                .compile(&mut cl_module, call_conv)
+                .expect("RVSDG to Cranelift compilation failed");
+        }
 
         // Finalize and write object file
         fs::create_dir_all("./lang_tmp").ok();
@@ -157,25 +175,29 @@ impl ModParser {
             println!("Object file written to: lang_tmp/out.o");
         }
 
-        let mut cc_comand = Command::new("tcc");
-        cc_comand.arg("lang_tmp/out.o").args(["-o", "out"]);
+        {
+            let _span = span!(Level::INFO, "linking").entered();
+            let mut cc_comand = Command::new("cc");
+            cc_comand.arg("lang_tmp/out.o").args(["-o", "out"]);
 
-        match cc_comand.output() {
-            Ok(output) => {
-                if !output.status.success() {
-                    eprintln!("TCC linking failed with status: {}", output.status);
-                    eprintln!("=== TCC stdout ===");
-                    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-                    eprintln!("=== TCC stderr ===");
-                    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-                    panic!();
+            match cc_comand.output() {
+                Ok(output) => {
+                    if !output.status.success() {
+                        eprintln!("CC linking failed with status: {}", output.status);
+                        eprintln!("=== CC stdout ===");
+                        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+                        eprintln!("=== CC stderr ===");
+                        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                        panic!();
+                    }
                 }
-            }
-            Err(e) => {
-                eprintln!("Failed to execute TCC: {}", e);
-                return Err(CompliationError::LexingError(vec![e.into()]));
-            }
-        };
+                Err(e) => {
+                    eprintln!("Failed to execute TCC: {}", e);
+                    return Err(CompliationError::LexingError(vec![e.into()]));
+                }
+            };
+        }
+
         let mod_parser = ModParser {};
 
         Ok(mod_parser)

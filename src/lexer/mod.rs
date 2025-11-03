@@ -1,3 +1,5 @@
+use tracing::info;
+
 use crate::{
     interner::{IdentId, SharedInterner},
     lexer::error::LexerError,
@@ -70,7 +72,9 @@ pub enum StrType {
 }
 
 impl<'src> Lexer<'src> {
+    #[tracing::instrument(skip(src, interner))]
     pub fn from_src_str(src: &'src str, interner: &SharedInterner) -> Result<Self, LexerError> {
+        info!("started lexing");
         let mut chars = src.char_indices().peekable();
         let mut lexer = Lexer {
             src,
@@ -198,6 +202,7 @@ impl<'src> Lexer<'src> {
                 kind,
             })
         }
+        info!("finished lexing");
         Ok(lexer)
     }
 

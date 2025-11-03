@@ -23,6 +23,7 @@ enum StructState {
     Visited,
 }
 
+#[tracing::instrument(skip(structs))]
 pub fn topological_sort_rev(structs: &[StructWithChild]) -> TopologicalSortResult {
     if structs.is_empty() {
         return TopologicalSortResult::Success(Vec::new());

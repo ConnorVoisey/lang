@@ -87,6 +87,7 @@ impl<'a> RvsdgToCranelift<'a> {
         }
     }
 
+    #[tracing::instrument(skip(self, cl_module, call_conv))]
     pub fn compile(
         mut self,
         cl_module: &mut ObjectModule,
