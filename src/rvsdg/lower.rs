@@ -264,7 +264,10 @@ impl<'a> AstLowering<'a> {
                 }
             }
 
-            StatementKind::ExplicitReturn(expr) => self.lower_expr(builder, expr),
+            StatementKind::ExplicitReturn(expr) => {
+                // TODO: set the has_early_return bool, not sure how this will function
+                self.lower_expr(builder, expr)
+            }
 
             StatementKind::BlockReturn { expr, .. } => self.lower_expr(builder, expr),
 
@@ -277,7 +280,7 @@ impl<'a> AstLowering<'a> {
             }
 
             StatementKind::Break { .. } => {
-                // TODO: Handle break
+                // TODO: set the break bool, not sure how this will function
                 None
             }
         }
@@ -474,7 +477,14 @@ impl<'a> AstLowering<'a> {
 
         // Thread state through the function call
         let state = self.current_state.expect("State not initialized");
-        let (new_state, result) = builder.call(state, func_id, arg_values, return_ty, span);
+        let (new_state, result) = builder.call(
+            state,
+            func_id,
+            arg_values,
+            self.types.void_type,
+            return_ty,
+            span,
+        );
 
         self.current_state = Some(new_state);
 
@@ -516,22 +526,32 @@ impl<'a> AstLowering<'a> {
             self.scan_block_for_assignments(else_blk, &mut all_modified);
         }
 
-        // Get current values of variables that will be modified
-        let captured_values: Vec<ValueId> = all_modified
-            .iter()
-            .filter_map(|sym| builder.lookup_symbol(*sym))
-            .collect();
+        // Save incoming state - it needs to be captured by gamma
+        let incoming_state = self.current_state.expect("State not initialized");
 
-        // Determine output types: result_ty + types of modified variables
-        let mut output_types = vec![result_ty];
-        for val in &captured_values {
+        // Get current values of variables that will be modified
+        // Track which symbols were actually captured (some might not be in scope yet)
+        let mut captured_symbols: Vec<SymbolId> = Vec::new();
+        let mut captured_values: Vec<ValueId> = vec![incoming_state]; // State is always first
+
+        for sym in &all_modified {
+            if let Some(val) = builder.lookup_symbol(*sym) {
+                captured_symbols.push(*sym);
+                captured_values.push(val);
+            }
+        }
+
+        // Determine output types: result_ty + state + types of modified variables
+        let mut output_types = vec![result_ty, self.types.void_type]; // result + state
+        for val in &captured_values[1..] {
+            // Skip state (already added)
             // Get the output type of this value
             if let Some(ty) = builder.get_value_type(*val) {
                 output_types.push(ty);
             }
         }
 
-        // Create gamma node with captured values
+        // Create gamma node with captured values (including state)
         let (gamma_node, regions) =
             builder.create_gamma(cond, captured_values, output_types, span.clone());
 
@@ -541,17 +561,56 @@ impl<'a> AstLowering<'a> {
         // Lower then branch
         self.modified_vars.clear();
         builder.start_region(regions[0]);
-        let then_value = self.lower_block(builder, then_block);
-        // Return block result
-        if let Some(val) = then_value {
-            builder.region_result(val, span.clone());
-        } else {
-            // No result value, use a dummy void constant
-            let void_val = builder.const_i64(0, self.types.void_type, span.clone());
-            builder.region_result(void_val, span.clone());
+
+        // Map region parameters to captured values
+        // Index 0 is state, indices 1+ are modified variables
+        let region_params = builder.get_region(regions[0]).params.clone();
+
+        // Map state parameter
+        let then_state_param = ValueId {
+            node: region_params[0],
+            output_index: 0,
+        };
+        self.current_state = Some(then_state_param);
+
+        // Map captured variables to their region parameters
+        for (i, sym) in captured_symbols.iter().enumerate() {
+            let param_value = ValueId {
+                node: region_params[i + 1], // +1 to skip state parameter
+                output_index: 0,
+            };
+            builder.define_symbol(*sym, param_value);
         }
-        // Return modified variable values
-        for sym in &all_modified {
+
+        let then_value = self.lower_block(builder, then_block);
+
+        // Return block result - must match result_ty
+        // If result_ty is Void, ignore the block's value and create a default
+        let result_val = if matches!(self.types.kind(result_ty), crate::types::TypeKind::Void) {
+            // For void result type, always create default (ignore block value)
+            builder.const_i64(0, result_ty, span.clone())
+        } else {
+            then_value.unwrap_or_else(|| {
+                // No result value - create default value of the correct type
+                match self.types.kind(result_ty) {
+                    crate::types::TypeKind::Int | crate::types::TypeKind::Uint => {
+                        builder.const_i64(0, result_ty, span.clone())
+                    }
+                    crate::types::TypeKind::Bool => {
+                        builder.const_bool(false, result_ty, span.clone())
+                    }
+                    _ => builder.const_i64(0, result_ty, span.clone()),
+                }
+            })
+        };
+        builder.region_result(result_val, span.clone());
+
+        // Return final state
+        let final_state = self.current_state.expect("State should be set");
+        builder.region_result(final_state, span.clone());
+
+        // Return modified variable values (in same order as captured)
+        for sym in &captured_symbols {
             if let Some(val) = builder.lookup_symbol(*sym) {
                 builder.region_result(val, span.clone());
             }
@@ -561,21 +620,60 @@ impl<'a> AstLowering<'a> {
         // Lower else branch
         self.modified_vars.clear();
         builder.start_region(regions[1]);
-        if let Some(else_blk) = else_block {
-            let else_value = self.lower_block(builder, else_blk);
-            if let Some(val) = else_value {
-                builder.region_result(val, span.clone());
-            } else {
-                let void_val = builder.const_i64(0, self.types.void_type, span.clone());
-                builder.region_result(void_val, span.clone());
-            }
-        } else {
-            // Empty else branch - return dummy value
-            let void_val = builder.const_i64(0, self.types.void_type, span.clone());
-            builder.region_result(void_val, span.clone());
+
+        // Map region parameters to captured values
+        // Index 0 is state, indices 1+ are modified variables
+        let region_params = builder.get_region(regions[1]).params.clone();
+
+        // Map state parameter
+        let else_state_param = ValueId {
+            node: region_params[0],
+            output_index: 0,
+        };
+        self.current_state = Some(else_state_param);
+
+        // Map captured variables to their region parameters
+        for (i, sym) in captured_symbols.iter().enumerate() {
+            let param_value = ValueId {
+                node: region_params[i + 1], // +1 to skip state parameter
+                output_index: 0,
+            };
+            builder.define_symbol(*sym, param_value);
         }
-        // Return modified variable values (may be unchanged in else branch)
-        for sym in &all_modified {
+
+        let else_value = if let Some(else_blk) = else_block {
+            self.lower_block(builder, else_blk)
+        } else {
+            None
+        };
+
+        // Return block result - must match result_ty (same as then branch)
+        // If result_ty is Void, ignore the block's value and create a default
+        let result_val = if matches!(self.types.kind(result_ty), crate::types::TypeKind::Void) {
+            // For void result type, always create default (ignore block value)
+            builder.const_i64(0, result_ty, span.clone())
+        } else {
+            else_value.unwrap_or_else(|| {
+                // No result value - create default value of the correct type
+                match self.types.kind(result_ty) {
+                    crate::types::TypeKind::Int | crate::types::TypeKind::Uint => {
+                        builder.const_i64(0, result_ty, span.clone())
+                    }
+                    crate::types::TypeKind::Bool => {
+                        builder.const_bool(false, result_ty, span.clone())
+                    }
+                    _ => builder.const_i64(0, result_ty, span.clone()),
+                }
+            })
+        };
+        builder.region_result(result_val, span.clone());
+
+        // Return final state
+        let final_state = self.current_state.expect("State should be set");
+        builder.region_result(final_state, span.clone());
+
+        // Return modified variable values (in same order as captured)
+        for sym in &captured_symbols {
             if let Some(val) = builder.lookup_symbol(*sym) {
                 builder.region_result(val, span.clone());
             }
@@ -585,11 +683,18 @@ impl<'a> AstLowering<'a> {
         // Restore modified vars state
         self.modified_vars = saved_modified;
 
-        // Update outer scope with gamma outputs for modified variables
-        for (i, sym) in all_modified.iter().enumerate() {
+        // Update outer scope with merged state from gamma (output index 1)
+        self.current_state = Some(ValueId {
+            node: gamma_node,
+            output_index: 1,
+        });
+
+        // Update outer scope with gamma outputs for captured variables
+        // Offset by +2 because output 0 is block result, output 1 is state
+        for (i, sym) in captured_symbols.iter().enumerate() {
             let gamma_output = ValueId {
                 node: gamma_node,
-                output_index: (i + 1) as u32, // +1 because output 0 is the block result
+                output_index: (i + 2) as u32,
             };
             builder.define_symbol(*sym, gamma_output);
         }

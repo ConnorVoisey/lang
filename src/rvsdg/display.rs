@@ -258,7 +258,18 @@ impl Node {
             }
 
             NodeKind::RegionResult => {
-                write!(out, "region_result ")?;
+                let region_id = func
+                    .regions
+                    .iter()
+                    .find(|r| r.results.contains(&self.id))
+                    .map(|r| r.id);
+
+                if let Some(rid) = region_id {
+                    write!(out, "region_result:{} ", rid.0)?;
+                } else {
+                    write!(out, "region_result ")?;
+                }
+
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }

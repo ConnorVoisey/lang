@@ -127,7 +127,7 @@ impl FunctionBuilder {
         };
 
         if let Some(&cached_node) = self.value_cache.get(&key) {
-            return ValueId::from_node(cached_node);
+            // return ValueId::from_node(cached_node);
         }
 
         // Create new node
@@ -354,6 +354,7 @@ impl FunctionBuilder {
         state: ValueId,
         function: FunctionId,
         args: Vec<ValueId>,
+        state_ty: TypeId,
         return_ty: TypeId,
         span: Span,
     ) -> (ValueId, ValueId) {
@@ -362,7 +363,7 @@ impl FunctionBuilder {
 
         let node = self.alloc_node(
             NodeKind::Call { function },
-            vec![return_ty, return_ty], // [new_state, result]
+            vec![state_ty, return_ty], // [new_state, result]
             inputs,
             span,
         );

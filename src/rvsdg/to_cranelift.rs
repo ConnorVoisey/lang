@@ -205,7 +205,13 @@ impl<'a> RvsdgToCranelift<'a> {
 
         cl_module
             .define_function(cl_func_id, &mut context)
-            .map_err(|e| color_eyre::eyre::eyre!("Failed to define function: {}", e))
+            .map_err(|e| {
+                color_eyre::eyre::eyre!(
+                    "Failed to define function: {:?}\n\nGenerated Cranelift IR:\n{}",
+                    e,
+                    context.func
+                )
+            })
     }
 
     fn type_to_cl(&self, type_id: TypeId) -> Option<types::Type> {
@@ -286,12 +292,22 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         let region = self.rvsdg_func.region(region_id);
 
         // Map region parameters to the input values
-        for (i, &param_node_id) in region.params.iter().enumerate() {
-            let value_id = ValueId {
-                node: param_node_id,
-                output_index: 0,
-            };
-            self.value_map.insert(value_id, inputs[i]);
+        // Skip void type parameters (state tokens) - they don't have Cranelift representation
+        let mut input_idx = 0;
+        for &param_node_id in &region.params {
+            let param_node = self.rvsdg_func.node(param_node_id);
+            let param_ty = param_node.output_types[0];
+
+            if !matches!(self.module.types.kind(param_ty), TypeKind::Void) {
+                // Non-void parameter - map it to the corresponding input
+                let value_id = ValueId {
+                    node: param_node_id,
+                    output_index: 0,
+                };
+                self.value_map.insert(value_id, inputs[input_idx]);
+                input_idx += 1;
+            }
+            // Void parameters are not mapped - they have no Cranelift representation
         }
 
         self.compile_region_impl(region_id)
@@ -314,7 +330,14 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             let node = self.rvsdg_func.node(result_node_id);
             if let NodeKind::RegionResult = node.kind {
                 let input_value = node.inputs[0]; // Result node takes one input
-                results.push(self.get_value(input_value)?);
+
+                // Skip void-typed results (state tokens)
+                let input_node = self.rvsdg_func.node(input_value.node);
+                let input_ty = input_node.output_types[input_value.output_index as usize];
+
+                if !matches!(self.module.types.kind(input_ty), TypeKind::Void) {
+                    results.push(self.get_value(input_value)?);
+                }
             }
         }
 
@@ -522,19 +545,27 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     self.builder.switch_to_block(region_blocks[i]);
 
                     // Get captured values (skip first input which is condition)
+                    // Also skip void types (state tokens) since they don't have Cranelift representation
                     let captured_inputs: Vec<Value> = node.inputs[1..]
                         .iter()
-                        .map(|&vid| self.get_value(vid))
+                        .filter_map(|&vid| {
+                            // Check if this is a void type
+                            let input_node = self.rvsdg_func.node(vid.node);
+                            let input_ty = input_node.output_types[vid.output_index as usize];
+                            if matches!(self.module.types.kind(input_ty), TypeKind::Void) {
+                                None // Skip void types
+                            } else {
+                                Some(self.get_value(vid))
+                            }
+                        })
                         .collect::<color_eyre::Result<Vec<_>>>()?;
 
                     // Compile the region with captured values
                     let region_results = self.compile_region(region_id, &captured_inputs)?;
 
-                    // Filter region results to only include non-void outputs
-                    let filtered_results: Vec<Value> = non_void_output_indices
-                        .iter()
-                        .map(|(idx, _)| region_results[*idx])
-                        .collect();
+                    // region_results already contains only non-void values
+                    // (void results were filtered out in compile_region_impl)
+                    let filtered_results: Vec<Value> = region_results;
 
                     // Jump to merge block with filtered results (convert Values to BlockArgs)
                     let block_args: Vec<_> = filtered_results
@@ -687,9 +718,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
     }
 
     fn get_value(&self, value_id: ValueId) -> color_eyre::Result<Value> {
-        self.value_map
-            .get(&value_id)
-            .copied()
-            .ok_or_else(|| color_eyre::eyre::eyre!("Value not found in map"))
+        self.value_map.get(&value_id).copied().ok_or_else(|| {
+            let node = self.rvsdg_func.node(value_id.node);
+            color_eyre::eyre::eyre!(
+                "Value not found in map: {:?} (node kind: {:?})",
+                value_id,
+                node.kind
+            )
+        })
     }
 }

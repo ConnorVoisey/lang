@@ -6,8 +6,9 @@ extern "C" {
     fn malloc(size Int) &CStr;
     fn fopen(file_name &CStr, mode &CStr) Int;
     fn fprintf(file Int, fmt &CStr, param &CStr) Int;
+    fn printf(fmt &CStr, param Int) Int;
     fn fread(buffer &CStr, size_of_part Int, amount_to_read Int, file Int) Int;
-    fn fwrite(buffer &CStr, size_of_part Int, amount_to_read Int, file Int) Int;
+    fn write(file Int, buffer &CStr, size Int) Int;
 }
 
 fn main() Int {
@@ -18,18 +19,19 @@ fn main() Int {
     let file = fopen(&file_name, &c"r");
     if file == 0 {
         fprintf(1, &c"Failed to open file %s\n", &file_name);
-        return 1;
-    };
+        1 
+    } else {
+        let no_break = true;
+        while no_break {
+            let read_amount = fread(buffer, 1, buffer_size, file);
+            write(1, buffer, buffer_size);
+            if read_amount < buffer_size {
+                no_break = false;
+            };
+        }
 
-    while true {
-        let read_amount = fread(buffer, 1, buffer_size, file);
-        fwrite(buffer, 1, buffer_size, file);
-        if read_amount < buffer_size {
-            break;
-        };
+        puts(&c"");
+        0
     }
-
-    puts(&c"");
-    0
 }
 
