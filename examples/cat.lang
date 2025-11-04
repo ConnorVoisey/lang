@@ -12,7 +12,7 @@ extern "C" {
 }
 
 fn main() Int {
-    let buffer_size = 1028;
+    let buffer_size = 8192;
     let buffer = malloc(buffer_size);
 
     let file_name = c"Cargo.lock";

@@ -23,6 +23,7 @@ use target_lexicon::Triple;
 use tracing::{Level, info, span};
 
 pub mod ast;
+pub mod cli;
 pub mod error;
 pub mod interner;
 pub mod lexer;

@@ -1,5 +1,7 @@
+use clap::Parser;
 use lang::{
     ModParser,
+    cli::Cli,
     interner::{Interner, SharedInterner},
 };
 use parking_lot::lock_api::RwLock;
@@ -7,9 +9,10 @@ use std::fs::read_to_string;
 use tracing_subscriber::layer::SubscriberExt;
 
 /// Set to false to use hierarchical console output
-const USE_CHROME_TRACING: bool = false;
+const USE_CHROME_TRACING: bool = true;
 
 fn main() -> color_eyre::Result<()> {
+    let cli_args = Cli::parse();
     let _guard;
 
     if USE_CHROME_TRACING {
@@ -32,18 +35,24 @@ fn main() -> color_eyre::Result<()> {
             )
             .init();
     }
-
-    let file_path = "examples/hello.lang";
-    let src_code = &read_to_string(file_path).unwrap();
-    let interner = Interner::new();
-    let shared_interner = SharedInterner::new(RwLock::new(interner));
-    match ModParser::parse_file(file_path, &shared_interner) {
-        Ok(v) => v,
-        Err(e) => {
-            e.display(src_code, file_path);
-            return Err(color_eyre::eyre::eyre!("Failed to compile module {e}"));
+    match cli_args.command {
+        lang::cli::Commands::Build { path } => {
+            let src_code = &read_to_string(&path).unwrap();
+            let interner = Interner::new();
+            let shared_interner = SharedInterner::new(RwLock::new(interner));
+            match ModParser::parse_file(&path, &shared_interner) {
+                Ok(v) => v,
+                Err(e) => {
+                    e.display(src_code, &path);
+                    return Err(color_eyre::eyre::eyre!("Failed to compile module {e}"));
+                }
+            };
         }
-    };
+        t => {
+            dbg!(t);
+            todo!("handle other command cases");
+        }
+    }
 
     Ok(())
 }
