@@ -6,17 +6,17 @@ extern "C" {
     fn printf(str &CStr, message &CStr, total Int) Int;
 }
 
-fn main() void {
-    calc("testing calculation");
+fn main() Int {
+    calc(&c"testing calculation");
 }
 
-fn add(num1 int, num2 int) int {
-    return num1 + num2;
+fn add(num1 Int, num2 Int) Int {
+    num1 + num2
 }
 
-fn calc(message str) void {
+fn calc(message &CStr) Int {
     let x = 5;
     let y = x + 2;
     let z = add(x, y + 5);
-    printf("%s z: %d\n", message, z);
+    printf(&c"%s z: %d\n", message, z)
 }
