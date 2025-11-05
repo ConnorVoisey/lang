@@ -7,34 +7,35 @@ use lang::{
 use parking_lot::lock_api::RwLock;
 use std::fs::read_to_string;
 use tracing_subscriber::layer::SubscriberExt;
-
-/// Set to false to use hierarchical console output
-const USE_CHROME_TRACING: bool = true;
+use tracing_subscriber::util::SubscriberInitExt;
 
 fn main() -> color_eyre::Result<()> {
     let cli_args = Cli::parse();
+
+    // set guard variable to live for entire program duration
     let _guard;
-
-    if USE_CHROME_TRACING {
-        // View in chrome://tracing or ui.perfetto.dev
-        let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new().build();
-
-        let subscriber = tracing_subscriber::registry().with(chrome_layer);
-
-        tracing::subscriber::set_global_default(subscriber)?;
-
-        _guard = guard;
+    let chrome_layer = if cli_args.chrome_tracing {
+        let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+        _guard = Some(guard);
+        Some(layer)
     } else {
-        use tracing_subscriber::util::SubscriberInitExt;
+        _guard = None;
+        None
+    };
 
-        tracing_subscriber::registry()
-            .with(
-                tracing_tree::HierarchicalLayer::new(2)
-                    .with_targets(true)
-                    .with_bracketed_fields(true),
-            )
-            .init();
-    }
+    let level_filter =
+        tracing_subscriber::filter::LevelFilter::from_level(cli_args.log_level.to_tracing_level());
+
+    tracing_subscriber::registry()
+        .with(level_filter)
+        .with(chrome_layer)
+        .with(
+            tracing_tree::HierarchicalLayer::new(2)
+                .with_targets(true)
+                .with_bracketed_fields(true),
+        )
+        .init();
+
     match cli_args.command {
         lang::cli::Commands::Build { path } => {
             let src_code = &read_to_string(&path).unwrap();
