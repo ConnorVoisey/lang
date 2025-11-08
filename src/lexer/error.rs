@@ -14,6 +14,9 @@ pub enum LexerError {
     #[error("Unhandled character: `{char}`")]
     UnhandledChar { span: Span, char: char },
 
+    #[error("Unhandled backslash character: `\\{char}`")]
+    UnhandledSlashChar { span: Span, char: char },
+
     #[error("Failed to parse digit char array into int")]
     ParseDigitStrToInt(#[from] ParseIntError),
 
@@ -42,6 +45,11 @@ impl ToDiagnostic for LexerError {
                 .with_message(self.to_string())
                 .with_labels(vec![Label::primary(file_id, span.start..span.end)])
                 .with_notes(vec![format!("Unhandled character: `{}`", char)]),
+
+            LexerError::UnhandledSlashChar { span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(file_id, span.start..span.end)])
+                .with_notes(vec![self.to_string()]),
 
             LexerError::ParseDigitStrToInt(_) => Diagnostic::error()
                 .with_message(self.to_string())

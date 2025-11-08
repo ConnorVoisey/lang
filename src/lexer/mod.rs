@@ -218,17 +218,65 @@ impl<'src> Lexer<'src> {
         let mut has_ended_str = false;
         while let Some((i, char)) = chars.peek() {
             match *char {
+                '\\' => {
+                    chars.next();
+                    match chars.peek() {
+                        Some((i, 'n')) => {
+                            end_i = *i;
+                            val.push('\n');
+                            chars.next();
+                        }
+                        Some((i, 'r')) => {
+                            end_i = *i;
+                            val.push('\r');
+                            chars.next();
+                        }
+                        Some((i, 't')) => {
+                            end_i = *i;
+                            val.push('\t');
+                            chars.next();
+                        }
+                        Some((i, '0')) => {
+                            end_i = *i;
+                            val.push('\0');
+                            chars.next();
+                        }
+                        Some((i, '"')) => {
+                            end_i = *i;
+                            val.push('\"');
+                            chars.next();
+                        }
+                        Some((i, '\'')) => {
+                            end_i = *i;
+                            val.push('\'');
+                            chars.next();
+                        }
+                        Some((i, char_val)) => {
+                            self.errs.push(LexerError::UnhandledSlashChar {
+                                span: Span {
+                                    start: *i - 1,
+                                    end: *i + 1,
+                                },
+                                char: *char_val,
+                            });
+                            chars.next();
+                        }
+                        None => {
+                            val.push('\\');
+                            chars.next();
+                            end_i += 1;
+                        }
+                    }
+                }
                 '"' => {
                     end_i = *i;
                     chars.next();
-                    if let Some('\\') = val.chars().last() {
-                        continue;
-                    }
                     has_ended_str = true;
                     break;
                 }
                 _ => {
                     val.push(*char);
+                    end_i = *i;
                     chars.next();
                 }
             }
@@ -351,7 +399,9 @@ mod test {
 
     #[test]
     fn basic_lexing() {
-        let src = "fn test(ident Int, ident_underscore C_Char, c_char Str)".to_string();
+        let src =
+            "fn test(ident Int, ident_underscore C_Char, c_char Str) Int {let foo = c\"test\\n\"}"
+                .to_string();
         let interner = Interner::new();
         let shared_interner = SharedInterner::new(RwLock::new(interner));
         let tokens = Lexer::from_src_str(&src, &shared_interner).unwrap().tokens;
@@ -374,6 +424,13 @@ mod test {
                 TokenKind::Ident(i.lookup_ident("c_char")),
                 TokenKind::Ident(i.lookup_ident("Str")),
                 TokenKind::BracketClose,
+                TokenKind::Ident(i.lookup_ident("Int")),
+                TokenKind::CurlyBracketOpen,
+                TokenKind::LetKeyWord,
+                TokenKind::Ident(i.lookup_ident("foo")),
+                TokenKind::Assign,
+                TokenKind::CStr(String::from("test\n")),
+                TokenKind::CurlyBracketClose,
             ]
         );
     }
