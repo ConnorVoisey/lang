@@ -132,6 +132,13 @@ impl<'a> StructLayoutInfo<'a> {
                     .expect("Struct layout must be computed before use, should have been covered in topological sort");
                 (layout.size, layout.alignment)
             }
+            TypeKind::Enum(enum_id) => {
+                todo!("Handle enums inside of structs")
+                // let layout = self
+                //     .get(*enum_id)
+                //     .expect("Enum layout must be computed before use, should have been covered in topological sort");
+                // (layout.size, layout.alignment)
+            }
             TypeKind::Fn { .. } => (8, 8), // function pointer
             TypeKind::Unknown => {
                 panic!("Cannot compute size of Unknown - should be resolved by type checker")

@@ -34,6 +34,15 @@ pub enum AstParseError {
     #[error("Expected identifier after `{{` in struct parsing")]
     StructExpectedIdent { token: Token },
 
+    #[error("Duplicate enum name definitions: {name}")]
+    EnumDuplicateStructNames { token: Token, name: String },
+
+    #[error("Expected `{{` after enum key word")]
+    EnumExpectedCurlyOpen { token: Token },
+
+    #[error("Expected identifier after `{{` in enum parsing")]
+    EnumExpectedIdent { token: Token },
+
     #[error("Unhandled token case {token:?}")]
     UnhandledToken { token: Token },
 
@@ -145,6 +154,36 @@ impl ToDiagnostic for AstParseError {
                 ])
                 .with_notes(vec![String::from(
                     "A function with this name already exists. Try renaming it.",
+                )]),
+
+            AstParseError::EnumDuplicateStructNames { token, name } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, token.span.start..token.span.end)
+                        .with_message(format!("duplicate enum name `{}`", name)),
+                ])
+                .with_notes(vec![String::from(
+                    "A enum with this name already exists. Try renaming it.",
+                )]),
+
+            AstParseError::EnumExpectedCurlyOpen { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(
+                    file_id,
+                    token.span.start..token.span.end,
+                )])
+                .with_notes(vec![String::from(
+                    "Expected a `{` after `enum Name`, e.g. `enum Foo {}`.",
+                )]),
+
+            AstParseError::EnumExpectedIdent { token } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![Label::primary(
+                    file_id,
+                    token.span.start..token.span.end,
+                )])
+                .with_notes(vec![String::from(
+                    "Expected an identifier after `enum`, e.g. `enum Foo {}`.",
                 )]),
 
             AstParseError::StructDuplicateStructNames { token, name } => Diagnostic::error()

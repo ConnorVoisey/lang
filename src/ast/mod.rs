@@ -1,7 +1,5 @@
-use tracing::instrument;
-
 use crate::{
-    ast::{ast_fn::AstFunc, ast_struct::AstStruct, error::AstParseError},
+    ast::{ast_enum::AstEnum, ast_fn::AstFunc, ast_struct::AstStruct, error::AstParseError},
     error::CompliationError,
     interner::{IdentId, SharedInterner},
     lexer::{Span, Token, TokenKind},
@@ -9,6 +7,7 @@ use crate::{
 };
 
 pub mod ast_block;
+pub mod ast_enum;
 pub mod ast_expr;
 pub mod ast_fn;
 pub mod ast_import;
@@ -38,6 +37,7 @@ pub struct Ast {
     pub imports: Vec<String>,
     pub fns: Vec<AstFunc>,
     pub extern_fns: Vec<AstFunc>,
+    pub enums: Vec<AstEnum>,
     pub structs: Vec<AstStruct>,
     pub tokens: Vec<Token>,
     pub next_token_i: usize,
@@ -283,6 +283,7 @@ impl Ast {
             fns: vec![],
             extern_fns: vec![],
             structs: vec![],
+            enums: vec![],
             tokens,
             next_token_i: 0,
             interner,

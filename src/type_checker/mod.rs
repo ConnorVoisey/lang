@@ -292,6 +292,10 @@ impl<'a> TypeChecker<'a> {
                                 // Return the struct type for struct identifiers
                                 self.arena.intern_struct_symbol(data.struct_id)
                             }
+                            SymbolKind::Enum(data) => {
+                                // Return the struct type for struct identifiers
+                                self.arena.intern_enum_symbol(data.enum_id)
+                            }
                             SymbolKind::FnArg(data) => data.type_id.unwrap(),
                         }
                     }

@@ -9,7 +9,7 @@ use crate::{
     interner::{IdentId, SharedInterner},
     lexer::Span,
     symbols::error::SymbolError,
-    types::{StructId, TypeArena, TypeId, TypeKind},
+    types::{EnumId, StructId, TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
 
@@ -48,11 +48,18 @@ pub struct StructSymbolData {
 }
 
 #[derive(Debug)]
+pub struct EnumSymbolData {
+    pub enum_id: EnumId,
+    pub full_def_span: Span,
+}
+
+#[derive(Debug)]
 pub enum SymbolKind {
     Fn(FnSymbolData),
     FnArg(FnArgSymbolData),
     Var(VarSymbolData),
     Struct(StructSymbolData),
+    Enum(EnumSymbolData),
 }
 
 #[derive(Debug)]
@@ -241,6 +248,7 @@ impl SymbolTable {
                             SymbolKind::FnArg(_) => todo!(),
                             SymbolKind::Var(_) => todo!(),
                             SymbolKind::Struct(_) => todo!(),
+                            SymbolKind::Enum(_) => todo!(),
                         }
                     }
                     None => match self.interner.read().resolve(*ident_id) {

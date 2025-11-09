@@ -8,6 +8,9 @@ use crate::{
 pub struct TypeId(pub usize);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EnumId(pub usize);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StructId(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +21,7 @@ pub enum TypeKind {
     CStr,
     Void,
     Bool,
+    Enum(EnumId),
     Struct(StructId),
     Array {
         size: usize,
@@ -237,6 +241,23 @@ impl TypeArena {
         }
     }
 
+    pub fn intern_enum_symbol(&mut self, enum_id: EnumId) -> TypeId {
+        // Ensure vec is large enough
+        if enum_id.0 >= self.struct_symbol_to_type.len() {
+            self.struct_symbol_to_type.resize(enum_id.0 + 1, None);
+        }
+
+        // Return existing TypeId if already interned
+        if let Some(type_id) = self.struct_symbol_to_type[enum_id.0] {
+            return type_id;
+        }
+
+        // Create new TypeId for this
+        let type_id = self.make(TypeKind::Enum(enum_id));
+        self.struct_symbol_to_type[enum_id.0] = Some(type_id);
+        type_id
+    }
+
     pub fn intern_struct_symbol(&mut self, struct_id: StructId) -> TypeId {
         // Ensure vec is large enough
         if struct_id.0 >= self.struct_symbol_to_type.len() {
@@ -278,6 +299,7 @@ impl TypeArena {
                         SymbolKind::FnArg(_) => todo!(),
                         SymbolKind::Var(_) => todo!(),
                         SymbolKind::Struct(struct_data) => TypeKind::Struct(struct_data.struct_id),
+                        SymbolKind::Enum(enum_data) => TypeKind::Enum(enum_data.enum_id),
                     }
                 }
                 None => TypeKind::Unknown,
@@ -303,6 +325,7 @@ impl TypeArena {
             TypeKind::Void => "Void".to_string(),
             TypeKind::Bool => "Bool".to_string(),
             TypeKind::Struct(struct_id) => format!("Struct {}", struct_id.0),
+            TypeKind::Enum(enum_id) => format!("Enum {}", enum_id.0),
             TypeKind::Array { size, inner_type } => {
                 format!(
                     "[{}; {}]",

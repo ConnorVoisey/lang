@@ -38,6 +38,7 @@ fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
         TypeKind::Var => todo!(),
         TypeKind::Array { .. } => todo!(),
         TypeKind::State => None,
+        TypeKind::Enum(_) => todo!(),
     }
 }
 

@@ -287,12 +287,16 @@ pub enum DebugOp {
     },
 }
 
-pub fn parse_debug(src: &str) -> DebugExprKind {
+pub fn parse_debug_setup(src: &str) -> (Ast, SymbolTable) {
     let interner = Interner::new();
     let shared_interner = SharedInterner::new(RwLock::new(interner));
-    let mut symbols = SymbolTable::new(shared_interner.clone());
+    let symbols = SymbolTable::new(shared_interner.clone());
     let lexer = Lexer::from_src_str(src, &shared_interner).unwrap();
-    let mut ast = Ast::new(lexer.tokens, shared_interner.clone());
+    let ast = Ast::new(lexer.tokens, shared_interner.clone());
+    (ast, symbols)
+}
+pub fn parse_debug(src: &str) -> DebugExprKind {
+    let (mut ast, mut symbols) = parse_debug_setup(src);
     ast.next_token();
     let expr = ast.parse_expr(0, &mut symbols, false).unwrap();
     ast.expr_to_debug(&expr)

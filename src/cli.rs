@@ -12,7 +12,7 @@ pub struct Cli {
     pub chrome_tracing: bool,
 
     /// set tracing level
-    #[arg(short, long, default_value_t = LogLevel::Info)]
+    #[arg(short, long, default_value_t = LogLevel::Warn)]
     pub log_level: LogLevel,
 }
 
