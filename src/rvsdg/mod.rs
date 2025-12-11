@@ -13,6 +13,7 @@
 use crate::{
     interner::SharedInterner,
     lexer::Span,
+    struct_layout::StructLayoutInfo,
     symbols::SymbolId,
     types::{TypeArena, TypeId},
 };
@@ -62,6 +63,7 @@ pub struct Module<'a> {
     pub extern_functions: Vec<ExternFunction>,
     pub types: &'a TypeArena,
     pub interner: SharedInterner,
+    pub struct_layout_info: &'a StructLayoutInfo<'a>,
 }
 
 pub struct ExternFunction {
@@ -191,22 +193,6 @@ pub enum NodeKind {
     /// Outputs: [new_state]
     Store { ty: TypeId },
 
-    // ===== Struct Operations =====
-    /// Get struct field address
-    /// Inputs: [struct_ptr]
-    /// Outputs: [field_ptr]
-    StructFieldAddr { field: FieldId },
-
-    /// Load struct field
-    /// Inputs: [state, struct_ptr]
-    /// Outputs: [new_state, value]
-    StructFieldLoad { field: FieldId },
-
-    /// Store struct field
-    /// Inputs: [state, struct_ptr, value]
-    /// Outputs: [new_state]
-    StructFieldStore { field: FieldId },
-
     // ===== Region-specific Nodes =====
     /// Region parameter (input to a region)
     RegionParam { index: usize },
@@ -265,12 +251,17 @@ pub struct Region {
 }
 
 impl<'a> Module<'a> {
-    pub fn new(types: &'a TypeArena, interner: SharedInterner) -> Self {
+    pub fn new(
+        types: &'a TypeArena,
+        struct_layout_info: &'a StructLayoutInfo,
+        interner: SharedInterner,
+    ) -> Self {
         Self {
             functions: Vec::new(),
             extern_functions: Vec::new(),
             types,
             interner,
+            struct_layout_info,
         }
     }
 }

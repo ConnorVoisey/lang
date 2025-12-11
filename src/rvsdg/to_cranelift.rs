@@ -8,9 +8,9 @@ use crate::{
         BinaryOp, ConstValue, ExternFunction, Function, FunctionId, Module, Node, NodeId, NodeKind,
         RegionId, UnaryOp, ValueId,
     },
-    struct_layout::StructLayout,
+    struct_layout::{StructLayout, StructLayoutInfo},
     symbols::SymbolTable,
-    types::{TypeArena, TypeId, TypeKind},
+    types::{StructId, TypeArena, TypeId, TypeKind},
 };
 use cranelift::prelude::*;
 use cranelift_codegen::{
@@ -25,8 +25,8 @@ use rustc_hash::FxHashMap;
 /// Convert an RVSDG type to a Cranelift type
 fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
     match types.kind(type_id) {
-        TypeKind::Int => Some(types::I32),
-        TypeKind::Uint => Some(types::I32),
+        TypeKind::I32 => Some(types::I64),
+        TypeKind::U64 => Some(types::I64),
         TypeKind::Bool => Some(types::I8),
         TypeKind::Str => todo!(),
         TypeKind::CStr => todo!(),
@@ -45,7 +45,7 @@ fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
 pub struct RvsdgToCranelift<'a> {
     module: &'a Module<'a>,
     symbols: &'a SymbolTable,
-    struct_layouts: &'a [StructLayout],
+    struct_layout_info: &'a StructLayoutInfo<'a>,
 
     // Map RVSDG function IDs to Cranelift function IDs
     func_map: FxHashMap<FunctionId, ClFuncId>,
@@ -59,6 +59,7 @@ pub struct FunctionCompiler<'a, 'b> {
     module: &'a Module<'a>,
     func_map: &'a FxHashMap<FunctionId, ClFuncId>,
     cl_module: &'b mut ObjectModule,
+    struct_layout_info: &'a StructLayoutInfo<'a>,
 
     // Map RVSDG values to Cranelift values
     value_map: FxHashMap<ValueId, Value>,
@@ -77,12 +78,12 @@ impl<'a> RvsdgToCranelift<'a> {
     pub fn new(
         module: &'a self::Module<'a>,
         symbols: &'a SymbolTable,
-        struct_layouts: &'a [StructLayout],
+        struct_layout_info: &'a StructLayoutInfo<'a>,
     ) -> Self {
         Self {
             module,
             symbols,
-            struct_layouts,
+            struct_layout_info,
             func_map: FxHashMap::default(),
             current_function: None,
         }
@@ -200,7 +201,14 @@ impl<'a> RvsdgToCranelift<'a> {
         let mut func_ctx = FunctionBuilderContext::new();
         let builder = FunctionBuilder::new(&mut cl_func, &mut func_ctx);
 
-        let compiler = FunctionCompiler::new(func, self.module, &self.func_map, cl_module, builder);
+        let compiler = FunctionCompiler::new(
+            func,
+            self.module,
+            &self.func_map,
+            cl_module,
+            self.struct_layout_info,
+            builder,
+        );
         compiler.compile()?;
 
         let mut context = Context::for_function(cl_func);
@@ -227,6 +235,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         module: &'a self::Module<'a>,
         func_map: &'a FxHashMap<FunctionId, ClFuncId>,
         cl_module: &'b mut ObjectModule,
+        struct_layout_info: &'a StructLayoutInfo<'a>,
         builder: FunctionBuilder<'a>,
     ) -> Self {
         Self {
@@ -234,6 +243,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             module,
             func_map,
             cl_module,
+            struct_layout_info,
             value_map: FxHashMap::default(),
             block_map: FxHashMap::default(),
             builder,
@@ -350,8 +360,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         match &node.kind {
             NodeKind::Const { value } => {
                 let cl_val = match value {
-                    ConstValue::I32(i) => self.builder.ins().iconst(types::I32, *i),
-                    ConstValue::U32(u) => self.builder.ins().iconst(types::I32, *u as i64),
+                    ConstValue::I32(i) => self.builder.ins().iconst(types::I64, *i),
+                    ConstValue::U32(u) => self.builder.ins().iconst(types::I64, *u as i64),
                     ConstValue::Bool(b) => self.builder.ins().iconst(types::I8, *b as i64),
                     ConstValue::String(bytes) => {
                         // Declare global data for the string
@@ -391,7 +401,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 );
                 Ok(Some(cl_val))
             }
-
             NodeKind::Binary { op, .. } => {
                 // Get input values
                 let lhs = self.get_value(node.inputs[0])?;
@@ -427,7 +436,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-
             NodeKind::Unary { op } => {
                 // Get input value
                 let operand = self.get_value(node.inputs[0])?;
@@ -450,7 +458,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-
             NodeKind::Call { function } => {
                 // Get the Cranelift function ID
                 let cl_func_id = *self.func_map.get(function).ok_or_else(|| {
@@ -489,7 +496,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-
             NodeKind::Gamma { regions } => {
                 // Gamma: conditional branch (if/else)
                 // Inputs: [condition, ...captured_values]
@@ -602,7 +608,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-
             NodeKind::Theta { region } => {
                 // Theta: loop construct
                 // Inputs: [...initial_values]
@@ -702,8 +707,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-
-            // Nodes that don't produce Cranelift values (already handled elsewhere)
             NodeKind::Parameter { .. }
             | NodeKind::RegionParam { .. }
             | NodeKind::StateToken
@@ -711,9 +714,80 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 // These are either already mapped or don't need Cranelift values
                 Ok(None)
             }
+            NodeKind::Lambda { region: _ } => {
+                // Lambda nodes are structural and handled separately
+                Ok(None)
+            }
+            NodeKind::Alloc { ty } => {
+                // Allocate memory (stack allocation for now)
+                // Inputs: [state]
+                // Outputs: [new_state, pointer]
 
-            _ => {
-                // TODO: Implement other node types
+                let (size, alignment) = self.get_size_and_align(*ty)?;
+
+                let stack_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    size as u32,
+                    alignment as u8,
+                ));
+
+                let ptr = self.builder.ins().stack_addr(types::I64, stack_slot, 0);
+
+                self.value_map.insert(
+                    ValueId {
+                        node: node.id,
+                        output_index: 1,
+                    },
+                    ptr,
+                );
+
+                Ok(Some(ptr))
+            }
+            NodeKind::Load { ty } => {
+                // Load struct field from memory
+                // Inputs: [state, struct_ptr]
+                // Outputs: [new_state, value]
+
+                let ptr_value_id = node.inputs[1];
+                let ptr = self.get_value(ptr_value_id)?;
+
+                let cl_type = type_to_cl(self.module.types, *ty).ok_or_else(|| {
+                    color_eyre::eyre::eyre!(
+                        "Cannot convert field type to Cranelift type: {:?}",
+                        self.module.types.kind(*ty)
+                    )
+                })?;
+
+                let value = self.builder.ins().load(cl_type, MemFlags::new(), ptr, 0);
+
+                // Store the loaded value (output index 1, since 0 is the state token)
+                // State tokens have no Cranelift representation, so we don't store them
+                self.value_map.insert(
+                    ValueId {
+                        node: node.id,
+                        output_index: 1,
+                    },
+                    value,
+                );
+
+                Ok(Some(value))
+            }
+            NodeKind::Store { ty } => {
+                // Inputs: [state, struct_ptr, value]
+                // Outputs: [new_state]
+
+                let ptr_value_id = node.inputs[1];
+                let ptr = self.get_value(ptr_value_id)?;
+
+                let value_to_store_id = node.inputs[2];
+                let value_to_store = self.get_value(value_to_store_id)?;
+
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), value_to_store, ptr, 0);
+
+                // No value to store in value_map - only output is state token
+                // State tokens have no Cranelift representation
                 Ok(None)
             }
         }
@@ -728,5 +802,57 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 node.kind
             )
         })
+    }
+
+    /// Get the StructId from a pointer value by dereferencing its type
+    fn get_struct_id_from_ptr(&self, ptr_value_id: ValueId) -> color_eyre::Result<StructId> {
+        let ptr_node = self.rvsdg_func.node(ptr_value_id.node);
+        let ptr_type = ptr_node.output_types[ptr_value_id.output_index as usize];
+
+        // Handle both Ref(Struct) and Struct directly
+        // (Alloc currently returns Struct instead of Ref(Struct))
+        let struct_type = match self.module.types.kind(ptr_type) {
+            TypeKind::Ref(inner_type) => *inner_type,
+            TypeKind::Struct(_) => ptr_type, // Already a struct type (from Alloc)
+            _ => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Expected pointer or struct type for struct field access, got {:?}",
+                    self.module.types.kind(ptr_type)
+                ));
+            }
+        };
+
+        // Extract the StructId from the type
+        match self.module.types.kind(struct_type) {
+            TypeKind::Struct(struct_id) => Ok(*struct_id),
+            _ => Err(color_eyre::eyre::eyre!(
+                "Expected struct type, got {:?}",
+                self.module.types.kind(struct_type)
+            )),
+        }
+    }
+
+    /// Get the size and alignment for a type
+    fn get_size_and_align(&self, type_id: TypeId) -> color_eyre::Result<(usize, usize)> {
+        match self.module.types.kind(type_id) {
+            TypeKind::Struct(struct_id) => {
+                let layout = &self.struct_layout_info.layouts[struct_id.0]
+                    .as_ref()
+                    .unwrap();
+                Ok((layout.size, layout.alignment))
+            }
+            TypeKind::Array {
+                size,
+                inner_type: _,
+            } => {
+                // TODO: not sure what the alignment of an array will be, but it probably is not the
+                // size
+                Ok((*size, *size))
+            }
+            _ => Err(color_eyre::eyre::eyre!(
+                "Alloc is currently only supported for struct types, got: {:?}",
+                self.module.types.kind(type_id)
+            )),
+        }
     }
 }

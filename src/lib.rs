@@ -103,12 +103,22 @@ impl ModParser {
             }
         }
 
-        let struct_layouts = StructLayoutInfo::new(&type_arena).compute_struct_layout();
+        let struct_layouts = {
+            let mut struct_layouts = StructLayoutInfo::new(&type_arena);
+            struct_layouts.compute_struct_layout();
+            struct_layouts
+        };
 
         // RVSDG pipeline: AST -> RVSDG -> Cranelift
         let rvsdg_module = {
             let _span = span!(Level::INFO, "rvsdg_lowering").entered();
-            let lowering = AstLowering::new(&ast, &type_arena, &symbols, interner.clone());
+            let lowering = AstLowering::new(
+                &ast,
+                &type_arena,
+                &symbols,
+                interner.clone(),
+                &struct_layouts,
+            );
             lowering.lower_module()
         };
 

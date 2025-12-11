@@ -3,17 +3,13 @@ import {
 
 extern "C" {
     fn puts(str &CStr) Int;
-    fn printf(fmt &CStr, param Int) Int;
+    fn printf(fmt &CStr, param Int, param2 Int) Int;
 }
 
 fn main() Int {
-    let res = {
-        puts(&c"testing");
-    } + {
-        puts(&c"testing");
-    };
+    let arr = [20, 35, 65, 87];
+    printf(&c"res: %d, %d\n", arr[0], arr[3]);
 
-printf(&c"res:\t\'%d\"\n", res);
     0
 }
 

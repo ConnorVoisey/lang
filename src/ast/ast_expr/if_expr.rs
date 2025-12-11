@@ -369,7 +369,7 @@ mod test {
         let expected = DebugExprKind::Op(Box::new(DebugOp::IfCond {
             condition: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                right: DebugExprKind::Atom(DebugAtom::Int(0)),
             })),
             block: vec![DebugStatement::BlockReturn {
                 expr: DebugExprKind::Atom(DebugAtom::Int(1)),
@@ -388,7 +388,7 @@ mod test {
             condition: DebugExprKind::Op(Box::new(DebugOp::LessThan {
                 left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                     left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-                    args: vec![DebugExprKind::Atom(DebugAtom::Ident("i".to_string()))],
+                    right: DebugExprKind::Atom(DebugAtom::Ident("i".to_string())),
                 })),
                 right: DebugExprKind::Atom(DebugAtom::Int(10)),
             })),

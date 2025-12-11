@@ -82,7 +82,7 @@ pub enum Op {
     },
     ArrayAccess {
         left: AstExpr,
-        args: Vec<AstExpr>,
+        right: AstExpr,
     },
     BracketOpen {
         left: AstExpr,
@@ -564,10 +564,10 @@ mod test {
         let debug_expr = parse_debug("foo[5 - 1];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
-            args: vec![DebugExprKind::Op(Box::new(DebugOp::Minus {
+            right: DebugExprKind::Op(Box::new(DebugOp::Minus {
                 left: DebugExprKind::Atom(DebugAtom::Int(5)),
                 right: DebugExprKind::Atom(DebugAtom::Int(1)),
-            }))],
+            })),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -579,38 +579,17 @@ mod test {
             left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                     left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
-                    args: vec![DebugExprKind::Op(Box::new(DebugOp::Minus {
-                        left: DebugExprKind::Atom(DebugAtom::Int(5)),
-                        right: DebugExprKind::Atom(DebugAtom::Int(1)),
-                    }))],
-                })),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(2))],
-            })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Ident("bar".to_string()))],
-        }));
-        assert_eq!(debug_expr, expected);
-    }
-
-    #[test]
-    fn multi_array() {
-        let debug_expr = parse_debug("foo[5 - 1, 2, 12390][2];");
-        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
-            left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
-                left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
-                args: vec![
-                    DebugExprKind::Op(Box::new(DebugOp::Minus {
+                    right: DebugExprKind::Op(Box::new(DebugOp::Minus {
                         left: DebugExprKind::Atom(DebugAtom::Int(5)),
                         right: DebugExprKind::Atom(DebugAtom::Int(1)),
                     })),
-                    DebugExprKind::Atom(DebugAtom::Int(2)),
-                    DebugExprKind::Atom(DebugAtom::Int(12390)),
-                ],
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Int(2)),
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(2))],
+            right: DebugExprKind::Atom(DebugAtom::Ident("bar".to_string())),
         }));
         assert_eq!(debug_expr, expected);
     }
-
     #[test]
     fn unary_negation() {
         let debug_expr = parse_debug("-42;");
@@ -680,7 +659,7 @@ mod test {
                     ident: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
                     args: vec![DebugExprKind::Atom(DebugAtom::Ident("bar".to_string()))],
                 })),
-                args: vec![DebugExprKind::Atom(DebugAtom::Ident("baz".to_string()))],
+                right: DebugExprKind::Atom(DebugAtom::Ident("baz".to_string())),
             })),
             right: DebugExprKind::Atom(DebugAtom::Ident("qux".to_string())),
         }));
@@ -871,7 +850,7 @@ mod test {
                 left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
                 right: DebugExprKind::Atom(DebugAtom::Ident("bar".to_string())),
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            right: DebugExprKind::Atom(DebugAtom::Int(0)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -901,10 +880,10 @@ mod test {
                     DebugOp::Dot {
                         left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                             left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-                            args: vec![DebugExprKind::Op(Box::new(DebugOp::Add {
+                            right: DebugExprKind::Op(Box::new(DebugOp::Add {
                                 left: DebugExprKind::Atom(DebugAtom::Ident("i".to_string())),
                                 right: DebugExprKind::Atom(DebugAtom::Int(1)),
-                            }))],
+                            })),
                         })),
                         right: DebugExprKind::Atom(DebugAtom::Ident("x".to_string())),
                     },
@@ -1113,7 +1092,7 @@ mod test {
                         })),
                         args: vec![],
                     })),
-                    args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                    right: DebugExprKind::Atom(DebugAtom::Int(0)),
                 })),
                 right: DebugExprKind::Atom(DebugAtom::Ident("field".to_string())),
             })),
@@ -1131,9 +1110,9 @@ mod test {
                     ident: DebugExprKind::Atom(DebugAtom::Ident("get_arr".to_string())),
                     args: vec![],
                 })),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                right: DebugExprKind::Atom(DebugAtom::Int(0)),
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(1))],
+            right: DebugExprKind::Atom(DebugAtom::Int(1)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -1313,7 +1292,7 @@ mod test {
                     })),
                     right: DebugExprKind::Atom(DebugAtom::Ident("bar".to_string())),
                 })),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                right: DebugExprKind::Atom(DebugAtom::Int(0)),
             },
         )))));
         assert_eq!(debug_expr, expected);

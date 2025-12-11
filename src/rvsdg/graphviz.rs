@@ -134,7 +134,6 @@ impl Node {
             NodeKind::Lambda { region } => {
                 label.push_str(&format!("λ region:{}", region.0));
             }
-
             NodeKind::Gamma { regions } => {
                 label.push_str("γ [");
                 for (i, r) in regions.iter().enumerate() {
@@ -145,19 +144,15 @@ impl Node {
                 }
                 label.push(']');
             }
-
             NodeKind::Theta { region } => {
                 label.push_str(&format!("θ region:{}", region.0));
             }
-
             NodeKind::Parameter { index } => {
                 label.push_str(&format!("param#{}", index));
             }
-
             NodeKind::StateToken => {
                 label.push_str("state");
             }
-
             NodeKind::Const { value } => {
                 label.push_str("const ");
                 match value {
@@ -196,47 +191,27 @@ impl Node {
                     }
                 }
             }
-
             NodeKind::Binary { op } => {
                 label.push_str(&format!("{:?}", op));
             }
-
             NodeKind::Unary { op } => {
                 label.push_str(&format!("{:?}", op));
             }
-
             NodeKind::Call { function } => {
                 label.push_str(&format!("call @f{}", function.0));
             }
-
             NodeKind::Alloc { ty } => {
                 label.push_str(&format!("alloc {}", type_name(*ty, module)));
             }
-
             NodeKind::Load { ty } => {
                 label.push_str(&format!("load {}", type_name(*ty, module)));
             }
-
             NodeKind::Store { ty } => {
                 label.push_str(&format!("store {}", type_name(*ty, module)));
             }
-
-            NodeKind::StructFieldAddr { field } => {
-                label.push_str(&format!("&.field{}", field.0));
-            }
-
-            NodeKind::StructFieldLoad { field } => {
-                label.push_str(&format!("load .field{}", field.0));
-            }
-
-            NodeKind::StructFieldStore { field } => {
-                label.push_str(&format!("store .field{}", field.0));
-            }
-
             NodeKind::RegionParam { index } => {
                 label.push_str(&format!("r-param#{}", index));
             }
-
             NodeKind::RegionResult => {
                 label.push_str("r-result");
             }

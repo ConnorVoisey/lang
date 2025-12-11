@@ -25,8 +25,8 @@ pub struct StructLayout {
 
 #[derive(Debug)]
 pub struct StructLayoutInfo<'a> {
-    layouts: Vec<Option<StructLayout>>,
-    types: &'a TypeArena,
+    pub layouts: Vec<Option<StructLayout>>,
+    pub types: &'a TypeArena,
 }
 
 impl<'a> StructLayoutInfo<'a> {
@@ -114,17 +114,17 @@ impl<'a> StructLayoutInfo<'a> {
         });
     }
 
-    fn size_and_align_of_type(&self, type_id: TypeId) -> (usize, usize) {
+    pub fn size_and_align_of_type(&self, type_id: TypeId) -> (usize, usize) {
         use crate::types::TypeKind;
 
         let type_kind = self.types.kind(type_id);
         match type_kind {
-            TypeKind::Int => (4, 4),    // i32
-            TypeKind::Uint => (4, 4),   // u32
+            TypeKind::I32 => (4, 4),
+            TypeKind::U64 => (8, 8),
             TypeKind::Bool => (1, 1),   // i8/bool
             TypeKind::Void => (0, 1),   // void has no size
             TypeKind::CStr => (8, 8),   // pointer to C string
-            TypeKind::Str => (16, 8), // fat pointer (ptr + len) - adjust based on your implementation
+            TypeKind::Str => (16, 8),   // fat pointer (ptr + len)
             TypeKind::Ref(_) => (8, 8), // reference/pointer
             TypeKind::Struct(struct_id) => {
                 let layout = self

@@ -23,21 +23,14 @@ impl Node {
 
     /// Check if this node has side effects (memory operations)
     pub fn has_side_effects(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Store { .. } | NodeKind::Call { .. } | NodeKind::StructFieldStore { .. }
-        )
+        matches!(self.kind, NodeKind::Store { .. } | NodeKind::Call { .. })
     }
 
     /// Check if this node is a memory operation
     pub fn is_memory_op(&self) -> bool {
         matches!(
             self.kind,
-            NodeKind::Alloc { .. }
-                | NodeKind::Load { .. }
-                | NodeKind::Store { .. }
-                | NodeKind::StructFieldLoad { .. }
-                | NodeKind::StructFieldStore { .. }
+            NodeKind::Alloc { .. } | NodeKind::Load { .. } | NodeKind::Store { .. }
         )
     }
 }

@@ -92,52 +92,23 @@ impl Ast {
             "Called parse_array_access not on a `[` {:?}",
             self.curr_token()
         );
-        let mut args = vec![];
-        loop {
-            if let Some(arg) = self.parse_expr(0, symbols, false) {
-                args.push(arg);
-            } else {
-                // parse_expr already pushed an error - try to recover
-            }
-            match self.curr_token() {
-                Some(Token {
-                    kind: TokenKind::Comma,
-                    ..
-                }) => {
-                    self.next_token();
-                    continue;
-                }
-                Some(Token {
-                    kind: TokenKind::SquareBracketClose,
-                    ..
-                }) => break,
-                Some(tok) => {
-                    self.errs
-                        .push(AstParseError::ExpectedClosingSquareBracket { token: tok.clone() });
-                    break;
-                }
-                None => {
-                    self.errs.push(AstParseError::UnexpectedEndOfInput);
-                    return None;
-                }
-            };
-        }
-        // consume the close if present
-        if matches!(
+        let right = self.parse_expr(0, symbols, false)?;
+        if !matches!(
             self.curr_token(),
             Some(Token {
                 kind: TokenKind::SquareBracketClose,
                 ..
             })
         ) {
-            self.next_token();
+            todo!("handle error, array access not closed")
         }
+        self.next_token();
         Some(AstExpr {
             span: Span {
                 start: self.tokens[start_token_at].span.start,
                 end: self.tokens[self.curr_token_i()].span.end,
             },
-            kind: ExprKind::Op(Box::new(Op::ArrayAccess { left: lhs, args })),
+            kind: ExprKind::Op(Box::new(Op::ArrayAccess { left: lhs, right })),
             type_id: None,
         })
     }
@@ -252,7 +223,7 @@ mod test {
         let debug_expr = parse_debug("arr[0];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            right: DebugExprKind::Atom(DebugAtom::Int(0)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -262,10 +233,10 @@ mod test {
         let debug_expr = parse_debug("arr[1 + 2];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-            args: vec![DebugExprKind::Op(Box::new(DebugOp::Add {
+            right: DebugExprKind::Op(Box::new(DebugOp::Add {
                 left: DebugExprKind::Atom(DebugAtom::Int(1)),
                 right: DebugExprKind::Atom(DebugAtom::Int(2)),
-            }))],
+            })),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -275,7 +246,7 @@ mod test {
         let debug_expr = parse_debug("arr[idx];");
         let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-            args: vec![DebugExprKind::Atom(DebugAtom::Ident("idx".to_string()))],
+            right: DebugExprKind::Atom(DebugAtom::Ident("idx".to_string())),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -286,9 +257,9 @@ mod test {
         let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
             left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                right: DebugExprKind::Atom(DebugAtom::Int(0)),
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(1))],
+            right: DebugExprKind::Atom(DebugAtom::Int(1)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -304,20 +275,7 @@ mod test {
                     DebugExprKind::Atom(DebugAtom::Int(3)),
                 ],
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
-        }));
-        assert_eq!(debug_expr, expected);
-    }
-
-    #[test]
-    fn multi_dimensional_access() {
-        let debug_expr = parse_debug("matrix[1, 2];");
-        let expected = DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
-            left: DebugExprKind::Atom(DebugAtom::Ident("matrix".to_string())),
-            args: vec![
-                DebugExprKind::Atom(DebugAtom::Int(1)),
-                DebugExprKind::Atom(DebugAtom::Int(2)),
-            ],
+            right: DebugExprKind::Atom(DebugAtom::Int(0)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -330,7 +288,7 @@ mod test {
         let expected = DebugExprKind::Op(Box::new(DebugOp::Add {
             left: DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
                 left: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
-                args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+                right: DebugExprKind::Atom(DebugAtom::Int(0)),
             })),
             right: DebugExprKind::Atom(DebugAtom::Int(5)),
         }));
@@ -345,7 +303,7 @@ mod test {
                 ident: DebugExprKind::Atom(DebugAtom::Ident("get_array".to_string())),
                 args: vec![],
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            right: DebugExprKind::Atom(DebugAtom::Int(0)),
         }));
         assert_eq!(debug_expr, expected);
     }
@@ -358,7 +316,7 @@ mod test {
                 left: DebugExprKind::Atom(DebugAtom::Ident("obj".to_string())),
                 right: DebugExprKind::Atom(DebugAtom::Ident("arr".to_string())),
             })),
-            args: vec![DebugExprKind::Atom(DebugAtom::Int(0))],
+            right: DebugExprKind::Atom(DebugAtom::Int(0)),
         }));
         assert_eq!(debug_expr, expected);
     }

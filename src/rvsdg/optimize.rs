@@ -114,7 +114,6 @@ fn has_observable_effects(kind: &NodeKind) -> bool {
 
         // Memory operations have effects
         NodeKind::Store { .. } => true,
-        NodeKind::StructFieldStore { .. } => true,
 
         // Alloc could have effects depending on implementation
         // For now, treat as effectful to be safe
@@ -122,7 +121,6 @@ fn has_observable_effects(kind: &NodeKind) -> bool {
 
         // Load operations have effects (they depend on state)
         NodeKind::Load { .. } => true,
-        NodeKind::StructFieldLoad { .. } => true,
 
         // State token is effectful
         NodeKind::StateToken => true,

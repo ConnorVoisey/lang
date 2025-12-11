@@ -4,7 +4,7 @@ use crate::{
         ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
-        ast_struct::AstStruct,
+        ast_struct::{AstStruct, AstStructField},
     },
     interner::{IdentId, SharedInterner},
     lexer::Span,
@@ -182,8 +182,13 @@ impl SymbolTable {
         let mut field_type_ids = Vec::with_capacity(struct_decl.fields.len());
         let mut fields_for_typekind = Vec::with_capacity(struct_decl.fields.len());
 
-        for (field_ident_id, _field_token_at, field_var_type) in &mut struct_decl.fields {
-            let field_type_id = match field_var_type {
+        for AstStructField {
+            ident,
+            ident_token_at: _,
+            var_type,
+        } in &mut struct_decl.fields
+        {
+            let field_type_id = match var_type {
                 VarType::Custom((ident_id, symbol_id_opt)) => {
                     *symbol_id_opt = self.lookup(*ident_id);
                     match symbol_id_opt {
@@ -193,16 +198,16 @@ impl SymbolTable {
                                 SymbolKind::Struct(data) => {
                                     types.intern_struct_symbol(data.struct_id)
                                 }
-                                _ => types.var_type_to_typeid(field_var_type, self),
+                                _ => types.var_type_to_typeid(var_type, self),
                             }
                         }
-                        None => types.var_type_to_typeid(field_var_type, self),
+                        None => types.var_type_to_typeid(var_type, self),
                     }
                 }
-                _ => types.var_type_to_typeid(field_var_type, self),
+                _ => types.var_type_to_typeid(var_type, self),
             };
             field_type_ids.push(Some(field_type_id));
-            fields_for_typekind.push((*field_ident_id, field_type_id));
+            fields_for_typekind.push((*ident, field_type_id));
         }
 
         // Intern the struct type (creates or returns existing TypeId)
@@ -252,8 +257,8 @@ impl SymbolTable {
                         }
                     }
                     None => match self.interner.read().resolve(*ident_id) {
-                        "Int" => TypeKind::Int,
-                        "Uint" => TypeKind::Uint,
+                        "Int" => TypeKind::I32,
+                        "Uint" => TypeKind::U64,
                         "Str" => TypeKind::Str,
                         "CStr" => TypeKind::CStr,
                         "Bool" => TypeKind::Bool,
@@ -366,9 +371,9 @@ impl SymbolTable {
                 Op::Block(block) => {
                     self.register_block(block);
                 }
-                Op::ArrayAccess { left, args } => {
+                Op::ArrayAccess { left, right } => {
                     self.register_expr(left);
-                    args.iter_mut().for_each(|expr| self.register_expr(expr));
+                    self.register_expr(right);
                 }
                 Op::ArrayInit { args } => {
                     args.iter_mut().for_each(|expr| self.register_expr(expr));
@@ -418,9 +423,9 @@ impl ToTypeKind for VarType {
     fn to_type_kind(&self, types: &mut TypeArena, symbols: &SymbolTable) -> TypeKind {
         match &self {
             VarType::Void => todo!(),
-            VarType::Int => TypeKind::Int,
+            VarType::Int => TypeKind::I32,
             VarType::Bool => TypeKind::Bool,
-            VarType::Uint => TypeKind::Uint,
+            VarType::Uint => TypeKind::U64,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
             VarType::CChar => todo!(),

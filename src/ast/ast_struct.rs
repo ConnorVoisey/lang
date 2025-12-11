@@ -5,6 +5,12 @@ use crate::{
     symbols::{SymbolId, SymbolKind, SymbolTable},
     types::{StructId, TypeId},
 };
+#[derive(Debug)]
+pub struct AstStructField {
+    pub ident: IdentId,
+    pub ident_token_at: usize,
+    pub var_type: VarType,
+}
 
 #[derive(Debug)]
 pub struct AstStruct {
@@ -13,7 +19,7 @@ pub struct AstStruct {
     pub symbol_id: SymbolId,
     pub struct_id: StructId,
     pub type_id: Option<TypeId>,
-    pub fields: Vec<(IdentId, usize, VarType)>,
+    pub fields: Vec<AstStructField>,
     pub field_type_ids: Vec<Option<TypeId>>,
 }
 
@@ -84,7 +90,11 @@ impl Ast {
                     let field_ident_id = *field_ident_id;
                     let ident_token_at = self.curr_token_i();
                     let (var_type, _type_span) = self.parse_var_type();
-                    fields.push((field_ident_id, ident_token_at, var_type));
+                    fields.push(AstStructField {
+                        ident: field_ident_id,
+                        ident_token_at,
+                        var_type,
+                    });
                     match self.next_token() {
                         Some(Token {
                             kind: TokenKind::Comma,
@@ -179,7 +189,7 @@ mod test {
         let fields_mapped = struct_val
             .fields
             .iter()
-            .map(|f| (i.resolve(f.0).to_string(), f.2.clone()))
+            .map(|f| (i.resolve(f.ident).to_string(), f.var_type.clone()))
             .collect::<Vec<_>>();
         let expected = vec![
             ("len".to_string(), VarType::Uint),

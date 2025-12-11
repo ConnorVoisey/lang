@@ -115,7 +115,6 @@ impl Node {
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
             }
-
             NodeKind::Gamma { regions } => {
                 write!(out, "gamma ")?;
                 self.display_inputs(out, func)?;
@@ -143,7 +142,6 @@ impl Node {
 
                 writeln!(out, "{}}}", ind)?;
             }
-
             NodeKind::Theta { region } => {
                 write!(out, "theta ")?;
                 self.display_inputs(out, func)?;
@@ -151,15 +149,12 @@ impl Node {
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
             }
-
             NodeKind::Parameter { index } => {
                 writeln!(out, "param #{}", index)?;
             }
-
             NodeKind::StateToken => {
                 writeln!(out, "state_token")?;
             }
-
             NodeKind::Const { value } => {
                 write!(out, "const ")?;
                 match value {
@@ -189,19 +184,16 @@ impl Node {
                     }
                 }
             }
-
             NodeKind::Binary { op } => {
                 write!(out, "{:?} ", op)?;
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
             NodeKind::Unary { op } => {
                 write!(out, "{:?} ", op)?;
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
             NodeKind::Call { function } => {
                 // Get the function name from the module
                 let func_name = if let Some(f) = module.functions.iter().find(|f| f.id == *function)
@@ -217,47 +209,24 @@ impl Node {
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
             NodeKind::Alloc { ty } => {
                 write!(out, "alloc {} ", type_name(*ty, module))?;
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
             NodeKind::Load { ty } => {
                 write!(out, "load {} ", type_name(*ty, module))?;
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
             NodeKind::Store { ty } => {
                 write!(out, "store {} ", type_name(*ty, module))?;
                 self.display_inputs(out, func)?;
                 writeln!(out)?;
             }
-
-            NodeKind::StructFieldAddr { field } => {
-                write!(out, "struct_field_addr .field{} ", field.0)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
-            }
-
-            NodeKind::StructFieldLoad { field } => {
-                write!(out, "struct_field_load .field{} ", field.0)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
-            }
-
-            NodeKind::StructFieldStore { field } => {
-                write!(out, "struct_field_store .field{} ", field.0)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
-            }
-
             NodeKind::RegionParam { index } => {
                 writeln!(out, "region_param #{}", index)?;
             }
-
             NodeKind::RegionResult => {
                 let region_id = func
                     .regions
@@ -332,9 +301,6 @@ fn value_name(func: &Function, node_id: NodeId, output_index: usize) -> String {
         NodeKind::Alloc { .. } => "alloc",
         NodeKind::Load { .. } => "load",
         NodeKind::Store { .. } => "store",
-        NodeKind::StructFieldAddr { .. } => "faddr",
-        NodeKind::StructFieldLoad { .. } => "fload",
-        NodeKind::StructFieldStore { .. } => "fstore",
         NodeKind::RegionParam { .. } => "rp",
         NodeKind::RegionResult => "rr",
     };

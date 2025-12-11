@@ -15,8 +15,8 @@ pub struct StructId(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    Int,
-    Uint,
+    I32,
+    U64,
     Str,
     CStr,
     Void,
@@ -87,8 +87,8 @@ impl TypeArena {
         };
 
         // Allocate primitive types once
-        arena.int_type = arena.make(TypeKind::Int);
-        arena.uint_type = arena.make(TypeKind::Uint);
+        arena.int_type = arena.make(TypeKind::I32);
+        arena.uint_type = arena.make(TypeKind::U64);
         arena.bool_type = arena.make(TypeKind::Bool);
         arena.str_type = arena.make(TypeKind::Str);
         arena.cstr_type = arena.make(TypeKind::CStr);
@@ -168,8 +168,8 @@ impl TypeArena {
                 self.union(rb, ra);
                 Ok(())
             }
-            (TypeKind::Int, TypeKind::Int)
-            | (TypeKind::Uint, TypeKind::Uint)
+            (TypeKind::I32, TypeKind::I32)
+            | (TypeKind::U64, TypeKind::U64)
             | (TypeKind::Str, TypeKind::Str)
             | (TypeKind::CStr, TypeKind::CStr)
             | (TypeKind::Bool, TypeKind::Bool)
@@ -278,8 +278,8 @@ impl TypeArena {
     pub fn var_type_to_type_kind(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeKind {
         match v {
             VarType::Void => TypeKind::Void,
-            VarType::Int => TypeKind::Int,
-            VarType::Uint => TypeKind::Uint,
+            VarType::Int => TypeKind::I32,
+            VarType::Uint => TypeKind::U64,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
             VarType::Bool => TypeKind::Bool,
@@ -318,8 +318,8 @@ impl TypeArena {
     }
     pub fn kind_to_string(&self, kind: &TypeKind) -> String {
         match kind {
-            TypeKind::Int => "Int".to_string(),
-            TypeKind::Uint => "Uint".to_string(),
+            TypeKind::I32 => "Int".to_string(),
+            TypeKind::U64 => "Uint".to_string(),
             TypeKind::Str => "Str".to_string(),
             TypeKind::CStr => "CStr".to_string(),
             TypeKind::Void => "Void".to_string(),

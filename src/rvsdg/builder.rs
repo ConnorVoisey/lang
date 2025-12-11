@@ -1,10 +1,13 @@
 //! Builder for constructing RVSDG graphs efficiently
 
 use super::*;
-use crate::lexer::Span;
+use crate::{
+    lexer::Span,
+    struct_layout::{self, StructLayout},
+};
 use rustc_hash::FxHashMap;
 
-pub struct FunctionBuilder {
+pub struct FunctionBuilder<'a> {
     func: Function,
     next_region_id: usize,
 
@@ -22,20 +25,23 @@ pub struct FunctionBuilder {
 
     // Hash-consing cache for pure operations (CSE)
     value_cache: FxHashMap<NodeKey, NodeId>,
+
+    pub struct_layout_info: &'a StructLayoutInfo<'a>,
 }
 
 pub struct RegionBuilder<'a> {
-    fb: &'a mut FunctionBuilder,
+    fb: &'a mut FunctionBuilder<'a>,
     region_id: RegionId,
 }
 
-impl FunctionBuilder {
+impl<'a> FunctionBuilder<'a> {
     pub fn new(
         id: FunctionId,
         name: SymbolId,
         params: Vec<Parameter>,
         return_type: TypeId,
         span: Span,
+        struct_layout_info: &'a StructLayoutInfo,
     ) -> Self {
         Self {
             func: Function {
@@ -56,6 +62,7 @@ impl FunctionBuilder {
             region_stack: Vec::new(),
             symbol_map: vec![FxHashMap::default()],
             value_cache: FxHashMap::default(),
+            struct_layout_info,
         }
     }
 
@@ -368,74 +375,6 @@ impl FunctionBuilder {
             span,
         );
         (self.value_n(node, 0), self.value_n(node, 1))
-    }
-
-    // ===== Struct Operations =====
-
-    pub fn struct_field_addr(
-        &mut self,
-        struct_ptr: ValueId,
-        field: FieldId,
-        field_ty: TypeId,
-        span: Span,
-    ) -> ValueId {
-        // Check cache (pure address calculation)
-        let key = NodeKey {
-            kind: NodeKeyKind::StructFieldAddr { field },
-            inputs: vec![struct_ptr],
-            output_types: vec![field_ty],
-        };
-
-        if let Some(&cached_node) = self.value_cache.get(&key) {
-            return ValueId::from_node(cached_node);
-        }
-
-        // Create new node
-        let node = self.alloc_node(
-            NodeKind::StructFieldAddr { field },
-            vec![field_ty],
-            vec![struct_ptr],
-            span,
-        );
-
-        // Cache it
-        self.value_cache.insert(key, node);
-        self.value(node)
-    }
-
-    pub fn struct_field_load(
-        &mut self,
-        state: ValueId,
-        struct_ptr: ValueId,
-        field: FieldId,
-        field_ty: TypeId,
-        span: Span,
-    ) -> (ValueId, ValueId) {
-        let node = self.alloc_node(
-            NodeKind::StructFieldLoad { field },
-            vec![field_ty, field_ty], // [new_state, value]
-            vec![state, struct_ptr],
-            span,
-        );
-        (self.value_n(node, 0), self.value_n(node, 1))
-    }
-
-    pub fn struct_field_store(
-        &mut self,
-        state: ValueId,
-        struct_ptr: ValueId,
-        field: FieldId,
-        value: ValueId,
-        state_ty: TypeId,
-        span: Span,
-    ) -> ValueId {
-        let node = self.alloc_node(
-            NodeKind::StructFieldStore { field },
-            vec![state_ty], // [new_state]
-            vec![state, struct_ptr, value],
-            span,
-        );
-        self.value(node)
     }
 
     // ===== Region Management =====

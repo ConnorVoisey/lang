@@ -66,7 +66,12 @@ impl<'a> TypeChecker<'a> {
         let new_fields: Vec<_> = s
             .fields
             .iter()
-            .map(|f| (f.0, self.arena.var_type_to_typeid(&f.2, self.symbols)))
+            .map(|f| {
+                (
+                    f.ident,
+                    self.arena.var_type_to_typeid(&f.var_type, self.symbols),
+                )
+            })
             .collect();
 
         let struct_type = self.arena.kind_mut(struct_type_id);
@@ -579,7 +584,34 @@ impl<'a> TypeChecker<'a> {
                         type_id
                     }
 
-                    Op::ArrayAccess { left: _, args: _ } => todo!(),
+                    Op::ArrayAccess { left, right } => {
+                        // left must be an array or array indexable thing (string),
+                        // For now only allow arrays, string array access is ambiguous, is bytes or
+                        // char array
+                        let left_ty_id =
+                            self.check_expr(left, return_type_id, fn_symbol_id, inside_loop)?;
+                        let left_kind = self.arena.kind(left_ty_id);
+                        let inner_type = match left_kind {
+                            TypeKind::Array {
+                                size: _,
+                                inner_type,
+                            } => Some(*inner_type),
+                            // TODO: add error here
+                            _ => None,
+                        };
+
+                        // right must be an integer
+                        let right_ty_id =
+                            self.check_expr(right, return_type_id, fn_symbol_id, inside_loop)?;
+                        let right_kind = self.arena.kind(right_ty_id);
+                        match right_kind {
+                            TypeKind::I32 | TypeKind::U64 => (),
+                            t => todo!("{:?} is not valid for array access", t),
+                        }
+
+                        expr.type_id = inner_type;
+                        inner_type
+                    }
                     Op::ArrayInit { args } => {
                         // all elements within the array init must have the same type
                         let mut type_id = None;

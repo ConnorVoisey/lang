@@ -1,5 +1,7 @@
 //! Lower AST to RVSDG
 
+use cranelift_codegen::isa::x64::settings::builder;
+
 use super::builder::FunctionBuilder;
 use super::*;
 use crate::{
@@ -8,10 +10,12 @@ use crate::{
         ast_block::{AstBlock, AstStatement, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
+        ast_struct::AstStructField,
     },
     interner::{IdentId, SharedInterner},
     lexer::{Span, TokenKind},
     rvsdg::optimize::dead_code_elimination,
+    struct_layout::{StructLayout, StructLayoutInfo},
     symbols::{SymbolKind, SymbolTable},
     types::{TypeArena, TypeKind},
 };
@@ -33,6 +37,7 @@ pub struct AstLowering<'a> {
 
     // Track variables modified in current scope (for gamma/theta nodes)
     modified_vars: Vec<SymbolId>,
+    struct_layout_info: &'a StructLayoutInfo<'a>,
 }
 
 impl<'a> AstLowering<'a> {
@@ -41,6 +46,7 @@ impl<'a> AstLowering<'a> {
         types: &'a TypeArena,
         symbols: &'a SymbolTable,
         interner: SharedInterner,
+        struct_layout_info: &'a StructLayoutInfo,
     ) -> Self {
         Self {
             ast,
@@ -51,12 +57,13 @@ impl<'a> AstLowering<'a> {
             func_map: FxHashMap::default(),
             current_state: None,
             modified_vars: Vec::new(),
+            struct_layout_info,
         }
     }
 
     #[tracing::instrument(skip(self))]
     pub fn lower_module(mut self) -> Module<'a> {
-        let mut module = Module::new(self.types, self.interner.clone());
+        let mut module = Module::new(self.types, self.struct_layout_info, self.interner.clone());
         // First register all functions
 
         // Register internal functions
@@ -168,6 +175,7 @@ impl<'a> AstLowering<'a> {
             params.clone(),
             return_type,
             fn_span.clone(),
+            self.struct_layout_info,
         );
 
         let lambda_region = builder.create_lambda(return_type, fn_span.clone());
@@ -428,7 +436,7 @@ impl<'a> AstLowering<'a> {
 
             Op::Dot { left, right } => {
                 // Struct field access
-                self.lower_struct_field_access(builder, left, right, ty, span)
+                self.lower_struct_field_access(builder, left, right, span)
             }
 
             Op::StructCreate {
@@ -446,9 +454,18 @@ impl<'a> AstLowering<'a> {
                 self.lower_expr(builder, operand)
             }
 
-            Op::ArrayAccess { .. } | Op::ArrayInit { .. } | Op::BracketOpen { .. } => {
-                // TODO: Handle these operations
-                None
+            Op::ArrayAccess { left, right } => {
+                // Somehow need to get access to the original arrays pointer and offset
+                self.lower_array_field_access(builder, left, right, ty, span)
+            }
+            Op::ArrayInit { args } => {
+                // RVSDG has no concept of arrays or pointers, so
+                // We need to call a malloc function which will return us a pointer,
+                // then we use this pointer as a usize
+                self.lower_array_create(builder, args, ty, span)
+            }
+            Op::BracketOpen { .. } => {
+                todo!("lower bracket open, is this not fn call, what is this? in RVSDG")
             }
         }
     }
@@ -596,7 +613,7 @@ impl<'a> AstLowering<'a> {
             then_value.unwrap_or_else(|| {
                 // No result value - create default value of the correct type
                 match self.types.kind(result_ty) {
-                    crate::types::TypeKind::Int | crate::types::TypeKind::Uint => {
+                    crate::types::TypeKind::I32 | crate::types::TypeKind::U64 => {
                         builder.const_i64(0, result_ty, span.clone())
                     }
                     crate::types::TypeKind::Bool => {
@@ -659,7 +676,7 @@ impl<'a> AstLowering<'a> {
             else_value.unwrap_or_else(|| {
                 // No result value - create default value of the correct type
                 match self.types.kind(result_ty) {
-                    crate::types::TypeKind::Int | crate::types::TypeKind::Uint => {
+                    crate::types::TypeKind::I32 | crate::types::TypeKind::U64 => {
                         builder.const_i64(0, result_ty, span.clone())
                     }
                     crate::types::TypeKind::Bool => {
@@ -854,11 +871,10 @@ impl<'a> AstLowering<'a> {
         builder: &mut FunctionBuilder,
         struct_expr: &AstExpr,
         field_expr: &AstExpr,
-        result_ty: TypeId,
         span: Span,
     ) -> Option<ValueId> {
         // Lower the struct expression (should produce a pointer to the struct)
-        let struct_val = self.lower_expr(builder, struct_expr)?;
+        let struct_ptr = self.lower_expr(builder, struct_expr)?;
 
         // Get the field name from the right expression (should be an Ident)
         let field_ident_id = match &field_expr.kind {
@@ -890,21 +906,32 @@ impl<'a> AstLowering<'a> {
             _ => return None, // Not a struct type
         };
 
-        // Look up the struct definition in the AST
         let struct_def = self.ast.structs.iter().find(|s| s.struct_id == struct_id)?;
 
         // Find the field index by name
         let field_index = struct_def
             .fields
             .iter()
-            .position(|(fid, _, _)| *fid == field_ident_id)?;
+            .position(|AstStructField { ident, .. }| *ident == field_ident_id)?;
+        let state = self.current_state.expect("State should still be set");
+        let field_ty = struct_def.field_type_ids[field_index].unwrap_or(self.types.void_type);
 
-        // Use StructFieldLoad with state threading
-        let state = self.current_state.expect("State not initialized");
-        let field_id = FieldId(field_index);
+        let offset = builder.struct_layout_info.layouts[struct_id.0]
+            .as_ref()
+            .unwrap()
+            .fields[field_index]
+            .offset;
+        let offset_val = builder.const_u64(offset as u64, self.types.uint_type, span.clone());
 
-        let (new_state, field_value) =
-            builder.struct_field_load(state, struct_val, field_id, result_ty, span);
+        // this is the pointer with the fields offset
+        let ptr = builder.binary(
+            BinaryOp::Add,
+            struct_ptr,
+            offset_val,
+            self.types.uint_type,
+            span.clone(),
+        );
+        let (new_state, field_value) = builder.load(state, ptr, field_ty, span.clone());
 
         // Update current state
         self.current_state = Some(new_state);
@@ -944,34 +971,140 @@ impl<'a> AstLowering<'a> {
         let (new_state, struct_ptr) = builder.alloc(state, result_ty, span.clone());
         self.current_state = Some(new_state);
 
-        // Store each field value
+        // foreach field, we need to store the value at the struct ptr + the fields offset
         for (field_ident_id, field_expr) in field_values {
             let field_index = struct_def
                 .fields
                 .iter()
-                .position(|(fid, _, _)| *fid == *field_ident_id)?;
+                .position(|AstStructField { ident, .. }| *ident == *field_ident_id)?;
 
-            // Lower the field value expression
             let field_value = self.lower_expr(builder, field_expr)?;
 
-            // Store the field
-            let field_id = FieldId(field_index);
             let state = self.current_state.expect("State should still be set");
             let field_ty = struct_def.field_type_ids[field_index].unwrap_or(self.types.void_type);
 
-            let new_state = builder.struct_field_store(
-                state,
+            let offset = builder.struct_layout_info.layouts[struct_id.0]
+                .as_ref()
+                .unwrap()
+                .fields[field_index]
+                .offset;
+            let offset_val = builder.const_u64(offset as u64, self.types.uint_type, span.clone());
+
+            // this is the pointer with the fields offset
+            let ptr = builder.binary(
+                BinaryOp::Add,
                 struct_ptr,
-                field_id,
-                field_value,
-                field_ty,
+                offset_val,
+                self.types.uint_type,
                 span.clone(),
             );
+            let new_state = builder.store(state, ptr, field_value, field_ty, span.clone());
 
             self.current_state = Some(new_state);
         }
 
         // Return the pointer to the struct
         Some(struct_ptr)
+    }
+
+    // TODO: this and lower_array_field_store share a lot of logic,
+    // reuse this across the functions
+    // TODO: also add a bounds check to both
+    fn lower_array_field_access(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        array_expr: &AstExpr,
+        field_expr: &AstExpr,
+        result_ty: TypeId,
+        span: Span,
+    ) -> Option<ValueId> {
+        // accessing an array field means:
+        // parse the array ptr
+        // parse the index val
+        // load (array ptr + (sizeof inner type * index val))
+        let array_val = self.lower_expr(builder, array_expr)?;
+        let index_val = self.lower_expr(builder, field_expr)?;
+        let inner_type_id = match self.types.kind(array_expr.type_id.unwrap()) {
+            TypeKind::Array {
+                size: _,
+                inner_type,
+            } => inner_type,
+            t => unreachable!("type id should be for an array, got: {:?}", t),
+        };
+        let (size, _) = builder
+            .struct_layout_info
+            .size_and_align_of_type(*inner_type_id);
+        let type_size = builder.const_u64(size as u64, self.types.uint_type, span.clone());
+        let offset = builder.binary(BinaryOp::Mul, index_val, type_size, result_ty, span.clone());
+        let ptr = builder.binary(BinaryOp::Add, array_val, offset, result_ty, span.clone());
+
+        let state = self.current_state.expect("State not initialized");
+
+        let (new_state, field_value) = builder.load(state, ptr, result_ty, span);
+
+        // Update current state
+        self.current_state = Some(new_state);
+
+        Some(field_value)
+    }
+
+    fn lower_array_create(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        args: &[AstExpr],
+        result_ty: TypeId,
+        span: Span,
+    ) -> Option<ValueId> {
+        // Allocate memory for the struct
+        let state = self.current_state.expect("State not initialized");
+        let (new_state, array_ptr) = builder.alloc(state, result_ty, span.clone());
+        self.current_state = Some(new_state);
+
+        let inner_type_id = match self.types.kind(result_ty) {
+            TypeKind::Array {
+                size: _,
+                inner_type,
+            } => inner_type,
+            t => unreachable!("type id should be for an array, got: {:?}", t),
+        };
+
+        // Store each field value
+        for (i, arg) in args.iter().enumerate() {
+            let field_value = self.lower_expr(builder, arg)?;
+
+            // value is going to be pointer as usize + (field index * size of inner type)
+            let zeroed_span = Span { start: 0, end: 0 };
+            let u64_type_id = self.types.uint_type;
+            // let inner_type_size =
+            //     builder.const_u64(todo!("get size from type id"), u64_type_id, zeroed_span);
+            let (size, _) = builder
+                .struct_layout_info
+                .size_and_align_of_type(*inner_type_id);
+            let inner_type_size = builder.const_u64(size as u64, u64_type_id, zeroed_span.clone());
+            let offset_index = builder.const_u64(i as u64, u64_type_id, zeroed_span.clone());
+            let offset_size = builder.binary(
+                BinaryOp::Mul,
+                inner_type_size,
+                offset_index,
+                u64_type_id,
+                span.clone(),
+            );
+            let ptr = builder.binary(
+                BinaryOp::Add,
+                array_ptr,
+                offset_size,
+                u64_type_id,
+                zeroed_span,
+            );
+
+            let state = self.current_state.expect("State should still be set");
+
+            let new_state = builder.store(state, ptr, field_value, *inner_type_id, span.clone());
+
+            self.current_state = Some(new_state);
+        }
+
+        // Return the pointer to the struct
+        Some(array_ptr)
     }
 }

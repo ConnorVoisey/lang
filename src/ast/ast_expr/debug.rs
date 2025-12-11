@@ -83,9 +83,9 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
-                Op::ArrayAccess { left, args } => DebugOp::ArrayAccess {
+                Op::ArrayAccess { left, right } => DebugOp::ArrayAccess {
                     left: self.expr_to_debug(left),
-                    args: args.iter().map(|arg| self.expr_to_debug(arg)).collect(),
+                    right: self.expr_to_debug(right),
                 },
                 Op::ArrayInit { args } => DebugOp::ArrayInit {
                     args: args.iter().map(|arg| self.expr_to_debug(arg)).collect(),
@@ -263,7 +263,7 @@ pub enum DebugOp {
     },
     ArrayAccess {
         left: DebugExprKind,
-        args: Vec<DebugExprKind>,
+        right: DebugExprKind,
     },
     ArrayInit {
         args: Vec<DebugExprKind>,
