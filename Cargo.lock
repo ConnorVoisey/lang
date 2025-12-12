@@ -525,6 +525,7 @@ dependencies = [
  "pretty_assertions",
  "quickscope",
  "rustc-hash",
+ "smallvec",
  "target-lexicon",
  "thiserror",
  "tracing",

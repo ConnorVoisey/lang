@@ -115,91 +115,158 @@ pub struct Node {
     pub kind: NodeKind,
     pub span: Span,
 
-    // Type information for each output
     pub output_types: Vec<TypeId>,
+}
 
-    // Inputs as edges
-    pub inputs: Vec<ValueId>,
+impl Node {
+    pub fn inputs(&self) -> smallvec::SmallVec<[ValueId; 4]> {
+        use smallvec::smallvec;
+        match &self.kind {
+            NodeKind::Lambda { .. } => smallvec![],
+            NodeKind::Gamma {
+                condition,
+                captured,
+                ..
+            } => {
+                let mut inputs = smallvec![*condition];
+                inputs.extend_from_slice(captured);
+                inputs
+            }
+            NodeKind::Theta { initial_values, .. } => {
+                let mut inputs = smallvec![];
+                inputs.extend_from_slice(initial_values);
+                inputs
+            }
+            NodeKind::Parameter { .. } => smallvec![],
+            NodeKind::StateToken => smallvec![],
+            NodeKind::Const { .. } => smallvec![],
+            NodeKind::Binary { left, right, .. } => smallvec![*left, *right],
+            NodeKind::Unary { operand, .. } => smallvec![*operand],
+            NodeKind::Call { state, args, .. } => {
+                let mut inputs = smallvec![*state];
+                inputs.extend_from_slice(args);
+                inputs
+            }
+            NodeKind::Alloc { state, .. } => smallvec![*state],
+            NodeKind::Load { state, address, .. } => smallvec![*state, *address],
+            NodeKind::Store {
+                state,
+                address,
+                value,
+                ..
+            } => smallvec![*state, *address, *value],
+            NodeKind::RegionParam { .. } => smallvec![],
+            NodeKind::RegionResult { value } => smallvec![*value],
+        }
+    }
+
+    pub fn has_inputs(&self) -> bool {
+        match &self.kind {
+            NodeKind::Lambda { .. }
+            | NodeKind::Parameter { .. }
+            | NodeKind::StateToken
+            | NodeKind::Const { .. }
+            | NodeKind::RegionParam { .. } => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum NodeKind {
     // ===== Structural Nodes =====
     /// Lambda: Function body
-    /// Inputs: []
     /// Outputs: [result values...]
     /// Contains: Single region with function body
-    Lambda { region: RegionId },
+    Lambda {
+        region: RegionId,
+        // No inputs
+    },
 
     /// Gamma: Conditional (if/else)
-    /// Inputs: [condition, ...captured_values]
     /// Outputs: [merged_results...]
     /// Contains: N regions (one per branch)
     Gamma {
         regions: Vec<RegionId>, // regions[0] = true branch, regions[1] = false branch
+        condition: ValueId,
+        captured: Vec<ValueId>,
     },
 
     /// Theta: Loop
-    /// Inputs: [...initial_values]
     /// Outputs: [...final_values]
     /// Contains: Single region that's the loop body
-    Theta { region: RegionId },
+    Theta {
+        region: RegionId,
+        initial_values: Vec<ValueId>,
+    },
 
     // ===== Simple Nodes =====
     /// Simple value node that just passes through a parameter
-    Parameter { index: usize },
+    Parameter {
+        index: usize,
+        // No inputs
+    },
 
     /// State token for effect threading
     /// This represents the "world state" that threads through all effectful operations
-    /// Inputs: []
     /// Outputs: [state]
     StateToken,
-
+    // No inputs
     /// Constant value
-    Const { value: ConstValue },
+    Const {
+        value: ConstValue,
+        // No inputs
+    },
 
     /// Binary operation
     Binary {
         op: BinaryOp,
-        // Inputs: [lhs, rhs]
+        left: ValueId,
+        right: ValueId,
     },
 
     /// Unary operation
-    Unary {
-        op: UnaryOp,
-        // Inputs: [operand]
-    },
+    Unary { op: UnaryOp, operand: ValueId },
 
     /// Function call
+    /// Outputs: [new_state, result]
     Call {
         function: FunctionId,
-        // Inputs: [state, ...args]
-        // Outputs: [new_state, result]
+        state: ValueId,
+        args: Vec<ValueId>,
     },
 
     // ===== Memory Operations =====
     /// Allocate memory (heap or stack determined later)
-    /// Inputs: [state]
     /// Outputs: [new_state, pointer]
-    Alloc { ty: TypeId },
+    Alloc { ty: TypeId, state: ValueId },
 
     /// Load from memory
-    /// Inputs: [state, address]
     /// Outputs: [new_state, value]
-    Load { ty: TypeId },
+    Load {
+        ty: TypeId,
+        state: ValueId,
+        address: ValueId,
+    },
 
     /// Store to memory
-    /// Inputs: [state, address, value]
     /// Outputs: [new_state]
-    Store { ty: TypeId },
+    Store {
+        ty: TypeId,
+        state: ValueId,
+        address: ValueId,
+        value: ValueId,
+    },
 
     // ===== Region-specific Nodes =====
     /// Region parameter (input to a region)
-    RegionParam { index: usize },
+    RegionParam {
+        index: usize,
+        // No inputs
+    },
 
     /// Region result (output from a region)
-    /// Inputs: [value]
-    RegionResult,
+    RegionResult { value: ValueId },
 }
 
 // ===== Constants =====
@@ -309,15 +376,22 @@ impl Function {
 #[derive(Hash, Eq, PartialEq, Clone)]
 pub(crate) struct NodeKey {
     pub kind: NodeKeyKind,
-    pub inputs: Vec<ValueId>,
     pub output_types: Vec<TypeId>,
 }
 
-/// Simplified node kind for hash-consing (only pure operations)
 #[derive(Hash, Eq, PartialEq, Clone)]
 pub(crate) enum NodeKeyKind {
-    Const(ConstValue), // ConstValue includes String which is hashable
-    Binary { op: BinaryOp },
-    Unary { op: UnaryOp },
-    StructFieldAddr { field: FieldId },
+    Const(ConstValue),
+    Binary {
+        op: BinaryOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    Unary {
+        op: UnaryOp,
+        operand: ValueId,
+    },
+    StructFieldAddr {
+        field: FieldId,
+    },
 }

@@ -1,7 +1,4 @@
 //! Lower AST to RVSDG
-
-use cranelift_codegen::isa::x64::settings::builder;
-
 use super::builder::FunctionBuilder;
 use super::*;
 use crate::{
@@ -15,7 +12,7 @@ use crate::{
     interner::{IdentId, SharedInterner},
     lexer::{Span, TokenKind},
     rvsdg::optimize::dead_code_elimination,
-    struct_layout::{StructLayout, StructLayoutInfo},
+    struct_layout::StructLayoutInfo,
     symbols::{SymbolKind, SymbolTable},
     types::{TypeArena, TypeKind},
 };
@@ -495,9 +492,8 @@ impl<'a> AstLowering<'a> {
             return None; // Some argument failed to lower
         }
 
-        // Thread state through the function call
         let state = self.current_state.expect("State not initialized");
-        let (new_state, result) = builder.call(
+        let call_outputs = builder.call(
             state,
             func_id,
             arg_values,
@@ -506,9 +502,9 @@ impl<'a> AstLowering<'a> {
             span,
         );
 
-        self.current_state = Some(new_state);
+        self.current_state = Some(call_outputs.state);
 
-        Some(result)
+        Some(call_outputs.result)
     }
 
     fn lower_if(
@@ -931,12 +927,10 @@ impl<'a> AstLowering<'a> {
             self.types.uint_type,
             span.clone(),
         );
-        let (new_state, field_value) = builder.load(state, ptr, field_ty, span.clone());
 
-        // Update current state
-        self.current_state = Some(new_state);
-
-        Some(field_value)
+        let load_outputs = builder.load(state, ptr, field_ty, span.clone());
+        self.current_state = Some(load_outputs.state);
+        Some(load_outputs.value)
     }
 
     fn lower_struct_create(
@@ -957,19 +951,16 @@ impl<'a> AstLowering<'a> {
             }
         })?;
 
-        // Get struct ID from symbol
         let struct_id = match &self.symbols.resolve(struct_symbol_id).kind {
             SymbolKind::Struct(data) => data.struct_id,
             _ => return None,
         };
 
-        // Look up the struct definition
         let struct_def = self.ast.structs.iter().find(|s| s.struct_id == struct_id)?;
 
-        // Allocate memory for the struct
         let state = self.current_state.expect("State not initialized");
-        let (new_state, struct_ptr) = builder.alloc(state, result_ty, span.clone());
-        self.current_state = Some(new_state);
+        let alloc_outputs = builder.alloc(state, result_ty, span.clone());
+        self.current_state = Some(alloc_outputs.state);
 
         // foreach field, we need to store the value at the struct ptr + the fields offset
         for (field_ident_id, field_expr) in field_values {
@@ -993,18 +984,18 @@ impl<'a> AstLowering<'a> {
             // this is the pointer with the fields offset
             let ptr = builder.binary(
                 BinaryOp::Add,
-                struct_ptr,
+                alloc_outputs.pointer,
                 offset_val,
                 self.types.uint_type,
                 span.clone(),
             );
-            let new_state = builder.store(state, ptr, field_value, field_ty, span.clone());
+            let store_outputs = builder.store(state, ptr, field_value, field_ty, span.clone());
 
-            self.current_state = Some(new_state);
+            self.current_state = Some(store_outputs.state);
         }
 
         // Return the pointer to the struct
-        Some(struct_ptr)
+        Some(alloc_outputs.pointer)
     }
 
     // TODO: this and lower_array_field_store share a lot of logic,
@@ -1040,12 +1031,9 @@ impl<'a> AstLowering<'a> {
 
         let state = self.current_state.expect("State not initialized");
 
-        let (new_state, field_value) = builder.load(state, ptr, result_ty, span);
-
-        // Update current state
-        self.current_state = Some(new_state);
-
-        Some(field_value)
+        let load_outputs = builder.load(state, ptr, result_ty, span);
+        self.current_state = Some(load_outputs.state);
+        Some(load_outputs.value)
     }
 
     fn lower_array_create(
@@ -1057,8 +1045,9 @@ impl<'a> AstLowering<'a> {
     ) -> Option<ValueId> {
         // Allocate memory for the struct
         let state = self.current_state.expect("State not initialized");
-        let (new_state, array_ptr) = builder.alloc(state, result_ty, span.clone());
-        self.current_state = Some(new_state);
+
+        let alloc_outputs = builder.alloc(state, result_ty, span.clone());
+        self.current_state = Some(alloc_outputs.state);
 
         let inner_type_id = match self.types.kind(result_ty) {
             TypeKind::Array {
@@ -1091,7 +1080,7 @@ impl<'a> AstLowering<'a> {
             );
             let ptr = builder.binary(
                 BinaryOp::Add,
-                array_ptr,
+                alloc_outputs.pointer,
                 offset_size,
                 u64_type_id,
                 zeroed_span,
@@ -1099,12 +1088,13 @@ impl<'a> AstLowering<'a> {
 
             let state = self.current_state.expect("State should still be set");
 
-            let new_state = builder.store(state, ptr, field_value, *inner_type_id, span.clone());
+            let store_outputs =
+                builder.store(state, ptr, field_value, *inner_type_id, span.clone());
 
-            self.current_state = Some(new_state);
+            self.current_state = Some(store_outputs.state);
         }
 
         // Return the pointer to the struct
-        Some(array_ptr)
+        Some(alloc_outputs.pointer)
     }
 }

@@ -7,6 +7,30 @@ use crate::{
 };
 use rustc_hash::FxHashMap;
 
+// Output structs for multi-output nodes
+#[derive(Debug, Clone, Copy)]
+pub struct LoadOutputs {
+    pub state: ValueId,
+    pub value: ValueId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct StoreOutputs {
+    pub state: ValueId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AllocOutputs {
+    pub state: ValueId,
+    pub pointer: ValueId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CallOutputs {
+    pub state: ValueId,
+    pub result: ValueId,
+}
+
 pub struct FunctionBuilder<'a> {
     func: Function,
     next_region_id: usize,
@@ -76,20 +100,13 @@ impl<'a> FunctionBuilder<'a> {
 
     // ===== Node Creation =====
 
-    fn alloc_node(
-        &mut self,
-        kind: NodeKind,
-        output_types: Vec<TypeId>,
-        inputs: Vec<ValueId>,
-        span: Span,
-    ) -> NodeId {
+    fn alloc_node(&mut self, kind: NodeKind, output_types: Vec<TypeId>, span: Span) -> NodeId {
         let id = NodeId(self.func.nodes.len());
         self.func.nodes.push(Node {
             id,
             kind,
             span,
             output_types,
-            inputs,
         });
 
         // Add to current region if one is active
@@ -119,7 +136,7 @@ impl<'a> FunctionBuilder<'a> {
     // ===== State Token =====
 
     pub fn state_token(&mut self, ty: TypeId, span: Span) -> ValueId {
-        let node = self.alloc_node(NodeKind::StateToken, vec![ty], vec![], span);
+        let node = self.alloc_node(NodeKind::StateToken, vec![ty], span);
         self.value(node)
     }
 
@@ -129,7 +146,6 @@ impl<'a> FunctionBuilder<'a> {
         // Check cache
         let key = NodeKey {
             kind: NodeKeyKind::Const(ConstValue::I32(value)),
-            inputs: vec![],
             output_types: vec![ty],
         };
 
@@ -143,7 +159,6 @@ impl<'a> FunctionBuilder<'a> {
                 value: ConstValue::I32(value),
             },
             vec![ty],
-            vec![],
             span,
         );
 
@@ -156,7 +171,6 @@ impl<'a> FunctionBuilder<'a> {
         // Check cache
         let key = NodeKey {
             kind: NodeKeyKind::Const(ConstValue::U32(value)),
-            inputs: vec![],
             output_types: vec![ty],
         };
 
@@ -170,7 +184,6 @@ impl<'a> FunctionBuilder<'a> {
                 value: ConstValue::U32(value),
             },
             vec![ty],
-            vec![],
             span,
         );
 
@@ -183,7 +196,6 @@ impl<'a> FunctionBuilder<'a> {
         // Check cache
         let key = NodeKey {
             kind: NodeKeyKind::Const(ConstValue::Bool(value)),
-            inputs: vec![],
             output_types: vec![ty],
         };
 
@@ -197,7 +209,6 @@ impl<'a> FunctionBuilder<'a> {
                 value: ConstValue::Bool(value),
             },
             vec![ty],
-            vec![],
             span,
         );
 
@@ -210,7 +221,6 @@ impl<'a> FunctionBuilder<'a> {
         // Check cache - hash-consing will deduplicate identical strings
         let key = NodeKey {
             kind: NodeKeyKind::Const(ConstValue::String(data.clone())),
-            inputs: vec![],
             output_types: vec![ty],
         };
 
@@ -224,7 +234,6 @@ impl<'a> FunctionBuilder<'a> {
                 value: ConstValue::String(data),
             },
             vec![ty],
-            vec![],
             span,
         );
 
@@ -255,8 +264,11 @@ impl<'a> FunctionBuilder<'a> {
 
         // Step 3: Check cache
         let key = NodeKey {
-            kind: NodeKeyKind::Binary { op },
-            inputs: vec![lhs, rhs],
+            kind: NodeKeyKind::Binary {
+                op,
+                left: lhs,
+                right: rhs,
+            },
             output_types: vec![result_ty],
         };
 
@@ -266,9 +278,12 @@ impl<'a> FunctionBuilder<'a> {
 
         // Step 4: Create new node
         let node = self.alloc_node(
-            NodeKind::Binary { op },
+            NodeKind::Binary {
+                op,
+                left: lhs,
+                right: rhs,
+            },
             vec![result_ty],
-            vec![lhs, rhs],
             span,
         );
 
@@ -291,8 +306,7 @@ impl<'a> FunctionBuilder<'a> {
 
         // Step 2: Check cache
         let key = NodeKey {
-            kind: NodeKeyKind::Unary { op },
-            inputs: vec![operand],
+            kind: NodeKeyKind::Unary { op, operand },
             output_types: vec![result_ty],
         };
 
@@ -301,7 +315,7 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Step 3: Create new node
-        let node = self.alloc_node(NodeKind::Unary { op }, vec![result_ty], vec![operand], span);
+        let node = self.alloc_node(NodeKind::Unary { op, operand }, vec![result_ty], span);
 
         // Step 4: Cache it
         self.value_cache.insert(key, node);
@@ -310,31 +324,33 @@ impl<'a> FunctionBuilder<'a> {
 
     // ===== Memory Operations =====
 
-    pub fn alloc(&mut self, state: ValueId, ty: TypeId, span: Span) -> (ValueId, ValueId) {
+    pub fn alloc(&mut self, state: ValueId, ty: TypeId, span: Span) -> AllocOutputs {
         let node = self.alloc_node(
-            NodeKind::Alloc { ty },
+            NodeKind::Alloc { ty, state },
             vec![ty, ty], // [new_state, pointer]
-            vec![state],
             span,
         );
-        (self.value_n(node, 0), self.value_n(node, 1))
+        AllocOutputs {
+            state: self.value_n(node, 0),
+            pointer: self.value_n(node, 1),
+        }
     }
 
-    pub fn load(
-        &mut self,
-        state: ValueId,
-        addr: ValueId,
-        ty: TypeId,
-        span: Span,
-    ) -> (ValueId, ValueId) {
+    pub fn load(&mut self, state: ValueId, addr: ValueId, ty: TypeId, span: Span) -> LoadOutputs {
         let state_ty = ty; // State type is same as loaded type for simplicity
         let node = self.alloc_node(
-            NodeKind::Load { ty },
+            NodeKind::Load {
+                ty,
+                state,
+                address: addr,
+            },
             vec![state_ty, ty], // [new_state, value]
-            vec![state, addr],
             span,
         );
-        (self.value_n(node, 0), self.value_n(node, 1))
+        LoadOutputs {
+            state: self.value_n(node, 0),
+            value: self.value_n(node, 1),
+        }
     }
 
     pub fn store(
@@ -344,14 +360,20 @@ impl<'a> FunctionBuilder<'a> {
         value: ValueId,
         ty: TypeId,
         span: Span,
-    ) -> ValueId {
+    ) -> StoreOutputs {
         let node = self.alloc_node(
-            NodeKind::Store { ty },
+            NodeKind::Store {
+                ty,
+                state,
+                address: addr,
+                value,
+            },
             vec![ty], // [new_state]
-            vec![state, addr, value],
             span,
         );
-        self.value(node)
+        StoreOutputs {
+            state: self.value(node),
+        }
     }
 
     // ===== Call =====
@@ -364,17 +386,20 @@ impl<'a> FunctionBuilder<'a> {
         state_ty: TypeId,
         return_ty: TypeId,
         span: Span,
-    ) -> (ValueId, ValueId) {
-        let mut inputs = vec![state];
-        inputs.extend(args);
-
+    ) -> CallOutputs {
         let node = self.alloc_node(
-            NodeKind::Call { function },
+            NodeKind::Call {
+                function,
+                state,
+                args,
+            },
             vec![state_ty, return_ty], // [new_state, result]
-            inputs,
             span,
         );
-        (self.value_n(node, 0), self.value_n(node, 1))
+        CallOutputs {
+            state: self.value_n(node, 0),
+            result: self.value_n(node, 1),
+        }
     }
 
     // ===== Region Management =====
@@ -415,7 +440,7 @@ impl<'a> FunctionBuilder<'a> {
         ty: TypeId,
         span: Span,
     ) -> ValueId {
-        let node = self.alloc_node(NodeKind::RegionParam { index }, vec![ty], vec![], span);
+        let node = self.alloc_node(NodeKind::RegionParam { index }, vec![ty], span);
         // Add to region's params
         self.regions[region_id.0].params.push(node);
         self.value(node)
@@ -423,7 +448,7 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn region_result(&mut self, value: ValueId, span: Span) -> NodeId {
         let ty = value.node; // Placeholder - we'd need to track types properly
-        let node = self.alloc_node(NodeKind::RegionResult, vec![], vec![value], span);
+        let node = self.alloc_node(NodeKind::RegionResult { value }, vec![], span);
 
         // Add to current region's results
         if let Some(region_id) = self.current_region {
@@ -456,7 +481,6 @@ impl<'a> FunctionBuilder<'a> {
             let _true_param = self.alloc_node(
                 NodeKind::RegionParam { index: i },
                 vec![captured_ty],
-                vec![],
                 span.clone(),
             );
             self.regions[true_region.0].params.push(_true_param);
@@ -465,7 +489,6 @@ impl<'a> FunctionBuilder<'a> {
             let _false_param = self.alloc_node(
                 NodeKind::RegionParam { index: i },
                 vec![captured_ty],
-                vec![],
                 span.clone(),
             );
             self.regions[false_region.0].params.push(_false_param);
@@ -473,15 +496,13 @@ impl<'a> FunctionBuilder<'a> {
 
         let regions = vec![true_region, false_region];
 
-        let mut inputs = vec![condition];
-        inputs.extend(captured);
-
         let node = self.alloc_node(
             NodeKind::Gamma {
                 regions: regions.clone(),
+                condition,
+                captured,
             },
             output_types,
-            inputs,
             span,
         );
 
@@ -504,16 +525,17 @@ impl<'a> FunctionBuilder<'a> {
             let param = self.alloc_node(
                 NodeKind::RegionParam { index: i },
                 vec![initial_ty],
-                vec![],
                 span.clone(),
             );
             self.regions[region.0].params.push(param);
         }
 
         let node = self.alloc_node(
-            NodeKind::Theta { region },
+            NodeKind::Theta {
+                region,
+                initial_values,
+            },
             output_types,
-            initial_values,
             span,
         );
 
@@ -530,13 +552,12 @@ impl<'a> FunctionBuilder<'a> {
             let param_node = self.alloc_node(
                 NodeKind::RegionParam { index: i },
                 vec![*param_ty],
-                vec![],
                 span.clone(),
             );
             self.regions[region.0].params.push(param_node);
         }
 
-        let node = self.alloc_node(NodeKind::Lambda { region }, vec![return_ty], vec![], span);
+        let node = self.alloc_node(NodeKind::Lambda { region }, vec![return_ty], span);
 
         self.func.root = node;
         region

@@ -109,7 +109,7 @@ impl Node {
             NodeKind::Parameter { .. } | NodeKind::RegionParam { .. } | NodeKind::StateToken => {
                 ("lightcyan", "filled,rounded")
             }
-            NodeKind::RegionResult => ("lightgray", "filled,rounded"),
+            NodeKind::RegionResult { .. } => ("lightgray", "filled,rounded"),
             _ => ("white", "rounded"),
         };
 
@@ -127,14 +127,14 @@ impl Node {
         )
     }
 
-    fn build_dot_label(&self, module: &Module, symbols: &SymbolTable) -> String {
+    fn build_dot_label(&self, module: &Module, _: &SymbolTable) -> String {
         let mut label = format!("n{}: ", self.id.0);
 
         match &self.kind {
             NodeKind::Lambda { region } => {
                 label.push_str(&format!("λ region:{}", region.0));
             }
-            NodeKind::Gamma { regions } => {
+            NodeKind::Gamma { regions, .. } => {
                 label.push_str("γ [");
                 for (i, r) in regions.iter().enumerate() {
                     if i > 0 {
@@ -144,7 +144,7 @@ impl Node {
                 }
                 label.push(']');
             }
-            NodeKind::Theta { region } => {
+            NodeKind::Theta { region, .. } => {
                 label.push_str(&format!("θ region:{}", region.0));
             }
             NodeKind::Parameter { index } => {
@@ -191,28 +191,28 @@ impl Node {
                     }
                 }
             }
-            NodeKind::Binary { op } => {
+            NodeKind::Binary { op, .. } => {
                 label.push_str(&format!("{:?}", op));
             }
-            NodeKind::Unary { op } => {
+            NodeKind::Unary { op, .. } => {
                 label.push_str(&format!("{:?}", op));
             }
-            NodeKind::Call { function } => {
+            NodeKind::Call { function, .. } => {
                 label.push_str(&format!("call @f{}", function.0));
             }
-            NodeKind::Alloc { ty } => {
+            NodeKind::Alloc { ty, .. } => {
                 label.push_str(&format!("alloc {}", type_name(*ty, module)));
             }
-            NodeKind::Load { ty } => {
+            NodeKind::Load { ty, .. } => {
                 label.push_str(&format!("load {}", type_name(*ty, module)));
             }
-            NodeKind::Store { ty } => {
+            NodeKind::Store { ty, .. } => {
                 label.push_str(&format!("store {}", type_name(*ty, module)));
             }
             NodeKind::RegionParam { index } => {
                 label.push_str(&format!("r-param#{}", index));
             }
-            NodeKind::RegionResult => {
+            NodeKind::RegionResult { .. } => {
                 label.push_str("r-result");
             }
         }
@@ -234,9 +234,9 @@ impl Node {
     fn to_dot_edges(&self, dot: &mut String, ind: &str) -> std::fmt::Result {
         let node_id = format!("n{}", self.id.0);
 
-        for (i, input) in self.inputs.iter().enumerate() {
+        for (i, input) in self.inputs().iter().enumerate() {
             let input_id = format!("n{}", input.node.0);
-            let label = if self.inputs.len() > 1 {
+            let label = if self.inputs().len() > 1 {
                 format!(" [label=\"{}\"]", i)
             } else {
                 String::new()

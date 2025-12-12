@@ -115,9 +115,17 @@ impl Node {
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
             }
-            NodeKind::Gamma { regions } => {
-                write!(out, "gamma ")?;
-                self.display_inputs(out, func)?;
+            NodeKind::Gamma {
+                regions,
+                captured,
+                condition,
+            } => {
+                write!(
+                    out,
+                    "gamma (condition: {}, captured: ({})) ",
+                    value_name(func, condition.node, condition.output_index as usize),
+                    self.display_val_slice(captured, func)
+                )?;
                 writeln!(out, " {{")?;
 
                 for (i, &region_id) in regions.iter().enumerate() {
@@ -142,9 +150,15 @@ impl Node {
 
                 writeln!(out, "{}}}", ind)?;
             }
-            NodeKind::Theta { region } => {
-                write!(out, "theta ")?;
-                self.display_inputs(out, func)?;
+            NodeKind::Theta {
+                region,
+                initial_values,
+            } => {
+                write!(
+                    out,
+                    "theta (intial_values: ({})) ",
+                    self.display_val_slice(initial_values, func)
+                )?;
                 writeln!(out, " region:{} {{", region.0)?;
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
@@ -184,17 +198,28 @@ impl Node {
                     }
                 }
             }
-            NodeKind::Binary { op } => {
-                write!(out, "{:?} ", op)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+            NodeKind::Binary { op, left, right } => {
+                writeln!(
+                    out,
+                    "{:?} (left: {}, right: {})",
+                    op,
+                    value_name(func, left.node, left.output_index as usize),
+                    value_name(func, right.node, right.output_index as usize),
+                )?;
             }
-            NodeKind::Unary { op } => {
-                write!(out, "{:?} ", op)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+            NodeKind::Unary { op, operand } => {
+                writeln!(
+                    out,
+                    "{:?} (operand: {})",
+                    op,
+                    value_name(func, operand.node, operand.output_index as usize),
+                )?;
             }
-            NodeKind::Call { function } => {
+            NodeKind::Call {
+                state,
+                function,
+                args,
+            } => {
                 // Get the function name from the module
                 let func_name = if let Some(f) = module.functions.iter().find(|f| f.id == *function)
                 {
@@ -205,62 +230,79 @@ impl Node {
                 } else {
                     format!("func{}", function.0)
                 };
-                write!(out, "call {} [id:{}] ", func_name, function.0)?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+                writeln!(
+                    out,
+                    "call {} [id:{}] (state: {}, args: ({}))",
+                    func_name,
+                    function.0,
+                    value_name(func, state.node, state.output_index as usize),
+                    self.display_val_slice(args, func),
+                )?;
             }
-            NodeKind::Alloc { ty } => {
-                write!(out, "alloc {} ", type_name(*ty, module))?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+            NodeKind::Alloc { ty, state } => {
+                writeln!(
+                    out,
+                    "alloc {} (state: {})",
+                    type_name(*ty, module),
+                    value_name(func, state.node, state.output_index as usize),
+                )?;
             }
-            NodeKind::Load { ty } => {
-                write!(out, "load {} ", type_name(*ty, module))?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+            NodeKind::Load { ty, state, address } => {
+                writeln!(
+                    out,
+                    "load {} (state: {}, address: {})",
+                    type_name(*ty, module),
+                    value_name(func, state.node, state.output_index as usize),
+                    value_name(func, address.node, address.output_index as usize),
+                )?;
             }
-            NodeKind::Store { ty } => {
-                write!(out, "store {} ", type_name(*ty, module))?;
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+            NodeKind::Store {
+                ty,
+                address,
+                state,
+                value,
+            } => {
+                writeln!(
+                    out,
+                    "store {} (state: {}, address: {}, value: {})",
+                    type_name(*ty, module),
+                    value_name(func, state.node, state.output_index as usize),
+                    value_name(func, address.node, address.output_index as usize),
+                    value_name(func, value.node, value.output_index as usize),
+                )?;
             }
             NodeKind::RegionParam { index } => {
                 writeln!(out, "region_param #{}", index)?;
             }
-            NodeKind::RegionResult => {
+            NodeKind::RegionResult { value } => {
                 let region_id = func
                     .regions
                     .iter()
                     .find(|r| r.results.contains(&self.id))
                     .map(|r| r.id);
 
-                if let Some(rid) = region_id {
-                    write!(out, "region_result:{} ", rid.0)?;
+                let region_str = if let Some(rid) = region_id {
+                    rid.0.to_string()
                 } else {
-                    write!(out, "region_result ")?;
-                }
-
-                self.display_inputs(out, func)?;
-                writeln!(out)?;
+                    String::from("None")
+                };
+                writeln!(
+                    out,
+                    "region_result:{} (value: {})",
+                    region_str,
+                    value_name(func, value.node, value.output_index as usize),
+                );
             }
         }
 
         Ok(())
     }
 
-    fn display_inputs(&self, out: &mut String, func: &Function) -> fmt::Result {
-        write!(out, "(")?;
-        for (i, input) in self.inputs.iter().enumerate() {
-            if i > 0 {
-                write!(out, ", ")?;
-            }
-            write!(
-                out,
-                "{}",
-                value_name(func, input.node, input.output_index as usize)
-            )?;
-        }
-        write!(out, ")")
+    fn display_val_slice(&self, vals: &[ValueId], func: &Function) -> String {
+        vals.iter()
+            .map(|v| value_name(func, v.node, v.output_index as usize))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -278,7 +320,7 @@ fn value_name(func: &Function, node_id: NodeId, output_index: usize) -> String {
         NodeKind::Theta { .. } => "th",
         NodeKind::Parameter { .. } => "p",
         NodeKind::Const { .. } => "c",
-        NodeKind::Binary { op } => match op {
+        NodeKind::Binary { op, .. } => match op {
             BinaryOp::Add => "add",
             BinaryOp::Sub => "sub",
             BinaryOp::Mul => "mul",
@@ -293,7 +335,7 @@ fn value_name(func: &Function, node_id: NodeId, output_index: usize) -> String {
             BinaryOp::And => "and",
             BinaryOp::Or => "or",
         },
-        NodeKind::Unary { op } => match op {
+        NodeKind::Unary { op, .. } => match op {
             UnaryOp::Neg => "neg",
             UnaryOp::Not => "not",
         },
@@ -302,7 +344,7 @@ fn value_name(func: &Function, node_id: NodeId, output_index: usize) -> String {
         NodeKind::Load { .. } => "load",
         NodeKind::Store { .. } => "store",
         NodeKind::RegionParam { .. } => "rp",
-        NodeKind::RegionResult => "rr",
+        NodeKind::RegionResult { .. } => "rr",
     };
 
     if output_index == 0 {

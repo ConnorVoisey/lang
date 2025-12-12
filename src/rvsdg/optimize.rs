@@ -61,7 +61,7 @@ fn mark_node(func: &Function, node_id: NodeId, live: &mut FxHashSet<NodeId>) {
     let node = func.node(node_id);
 
     // Mark all input nodes
-    for input in &node.inputs {
+    for input in &node.inputs() {
         mark_node(func, input.node, live);
     }
 
@@ -70,12 +70,19 @@ fn mark_node(func: &Function, node_id: NodeId, live: &mut FxHashSet<NodeId>) {
         NodeKind::Lambda { region } => {
             mark_region(func, *region, live);
         }
-        NodeKind::Gamma { regions } => {
+        NodeKind::Gamma {
+            regions,
+            captured,
+            condition,
+        } => {
             for &region_id in regions {
                 mark_region(func, region_id, live);
             }
         }
-        NodeKind::Theta { region } => {
+        NodeKind::Theta {
+            region,
+            initial_values,
+        } => {
             mark_region(func, *region, live);
         }
         _ => {}
@@ -100,7 +107,8 @@ fn mark_region(func: &Function, region_id: RegionId, live: &mut FxHashSet<NodeId
     for &node_id in &region.nodes {
         let node = func.node(node_id);
         // Only mark if it's a result, has effects, or is structural
-        if matches!(node.kind, NodeKind::RegionResult) || has_observable_effects(&node.kind) {
+        if matches!(node.kind, NodeKind::RegionResult { .. }) || has_observable_effects(&node.kind)
+        {
             mark_node(func, node_id, live);
         }
     }
@@ -126,7 +134,7 @@ fn has_observable_effects(kind: &NodeKind) -> bool {
         NodeKind::StateToken => true,
 
         // RegionResult produces output
-        NodeKind::RegionResult => true,
+        NodeKind::RegionResult { .. } => true,
 
         // Everything else is pure
         _ => false,

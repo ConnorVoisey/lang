@@ -8,7 +8,7 @@ use crate::{
         BinaryOp, ConstValue, ExternFunction, Function, FunctionId, Module, Node, NodeId, NodeKind,
         RegionId, UnaryOp, ValueId,
     },
-    struct_layout::{StructLayout, StructLayoutInfo},
+    struct_layout::StructLayoutInfo,
     symbols::SymbolTable,
     types::{StructId, TypeArena, TypeId, TypeKind},
 };
@@ -340,15 +340,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         let mut results = Vec::new();
         for &result_node_id in &region.results {
             let node = self.rvsdg_func.node(result_node_id);
-            if let NodeKind::RegionResult = node.kind {
-                let input_value = node.inputs[0]; // Result node takes one input
-
+            if let NodeKind::RegionResult { value } = node.kind {
                 // Skip void-typed results (state tokens)
-                let input_node = self.rvsdg_func.node(input_value.node);
-                let input_ty = input_node.output_types[input_value.output_index as usize];
+                let input_node = self.rvsdg_func.node(value.node);
+                let input_ty = input_node.output_types[value.output_index as usize];
 
                 if !matches!(self.module.types.kind(input_ty), TypeKind::Void) {
-                    results.push(self.get_value(input_value)?);
+                    results.push(self.get_value(value)?);
                 }
             }
         }
@@ -401,10 +399,9 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 );
                 Ok(Some(cl_val))
             }
-            NodeKind::Binary { op, .. } => {
-                // Get input values
-                let lhs = self.get_value(node.inputs[0])?;
-                let rhs = self.get_value(node.inputs[1])?;
+            NodeKind::Binary { op, left, right } => {
+                let lhs = self.get_value(*left)?;
+                let rhs = self.get_value(*right)?;
 
                 let cl_val = match op {
                     BinaryOp::Add => self.builder.ins().iadd(lhs, rhs),
@@ -436,9 +433,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-            NodeKind::Unary { op } => {
-                // Get input value
-                let operand = self.get_value(node.inputs[0])?;
+            NodeKind::Unary { op, operand } => {
+                let operand = self.get_value(*operand)?;
 
                 let cl_val = match op {
                     UnaryOp::Neg => self.builder.ins().ineg(operand),
@@ -458,7 +454,11 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-            NodeKind::Call { function } => {
+            NodeKind::Call {
+                function,
+                state,
+                args,
+            } => {
                 // Get the Cranelift function ID
                 let cl_func_id = *self.func_map.get(function).ok_or_else(|| {
                     color_eyre::eyre::eyre!("Function {:?} not found in func_map", function)
@@ -470,7 +470,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .declare_func_in_func(cl_func_id, self.builder.func);
 
                 // First input is state token (skip it), rest are actual arguments
-                let args: Vec<Value> = node.inputs[1..]
+                let args: Vec<Value> = args
                     .iter()
                     .map(|&value_id| self.get_value(value_id))
                     .collect::<color_eyre::Result<Vec<_>>>()?;
@@ -496,13 +496,17 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-            NodeKind::Gamma { regions } => {
+            NodeKind::Gamma {
+                regions,
+                condition,
+                captured,
+            } => {
                 // Gamma: conditional branch (if/else)
                 // Inputs: [condition, ...captured_values]
                 // Outputs: merged results from all branches
 
                 // Get the condition value
-                let condition = self.get_value(node.inputs[0])?;
+                let condition = self.get_value(*condition)?;
 
                 // Create blocks for each region (typically 2: true and false)
                 let mut region_blocks = Vec::new();
@@ -554,7 +558,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                     // Get captured values (skip first input which is condition)
                     // Also skip void types (state tokens) since they don't have Cranelift representation
-                    let captured_inputs: Vec<Value> = node.inputs[1..]
+                    let captured_inputs: Vec<Value> = captured
                         .iter()
                         .filter_map(|&vid| {
                             // Check if this is a void type
@@ -608,7 +612,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-            NodeKind::Theta { region } => {
+            NodeKind::Theta {
+                region,
+                initial_values,
+            } => {
                 // Theta: loop construct
                 // Inputs: [...initial_values]
                 // Region outputs: [condition, ...updated_values]
@@ -636,9 +643,9 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 }
 
                 // Get initial values (only non-void ones, matching non_void_output_indices)
-                let initial_values: Vec<Value> = non_void_output_indices
+                let initial_values: Vec<Value> = initial_values
                     .iter()
-                    .map(|&(idx, _)| self.get_value(node.inputs[idx]))
+                    .map(|value_id| self.get_value(*value_id))
                     .collect::<color_eyre::Result<Vec<_>>>()?;
 
                 // Jump to header with initial values
@@ -710,7 +717,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             NodeKind::Parameter { .. }
             | NodeKind::RegionParam { .. }
             | NodeKind::StateToken
-            | NodeKind::RegionResult => {
+            | NodeKind::RegionResult { .. } => {
                 // These are either already mapped or don't need Cranelift values
                 Ok(None)
             }
@@ -718,7 +725,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 // Lambda nodes are structural and handled separately
                 Ok(None)
             }
-            NodeKind::Alloc { ty } => {
+            NodeKind::Alloc { ty, state: _ } => {
                 // Allocate memory (stack allocation for now)
                 // Inputs: [state]
                 // Outputs: [new_state, pointer]
@@ -743,13 +750,12 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(ptr))
             }
-            NodeKind::Load { ty } => {
-                // Load struct field from memory
-                // Inputs: [state, struct_ptr]
-                // Outputs: [new_state, value]
-
-                let ptr_value_id = node.inputs[1];
-                let ptr = self.get_value(ptr_value_id)?;
+            NodeKind::Load {
+                ty,
+                address,
+                state: _,
+            } => {
+                let ptr = self.get_value(*address)?;
 
                 let cl_type = type_to_cl(self.module.types, *ty).ok_or_else(|| {
                     color_eyre::eyre::eyre!(
@@ -759,9 +765,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 })?;
 
                 let value = self.builder.ins().load(cl_type, MemFlags::new(), ptr, 0);
-
-                // Store the loaded value (output index 1, since 0 is the state token)
-                // State tokens have no Cranelift representation, so we don't store them
                 self.value_map.insert(
                     ValueId {
                         node: node.id,
@@ -772,15 +775,15 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(value))
             }
-            NodeKind::Store { ty } => {
-                // Inputs: [state, struct_ptr, value]
-                // Outputs: [new_state]
+            NodeKind::Store {
+                ty,
+                address,
+                value,
+                state: _,
+            } => {
+                let ptr = self.get_value(*address)?;
 
-                let ptr_value_id = node.inputs[1];
-                let ptr = self.get_value(ptr_value_id)?;
-
-                let value_to_store_id = node.inputs[2];
-                let value_to_store = self.get_value(value_to_store_id)?;
+                let value_to_store = self.get_value(*value)?;
 
                 self.builder
                     .ins()
