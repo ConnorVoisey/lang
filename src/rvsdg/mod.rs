@@ -123,40 +123,29 @@ impl Node {
         use smallvec::smallvec;
         match &self.kind {
             NodeKind::Lambda { .. } => smallvec![],
-            NodeKind::Gamma {
-                condition,
-                captured,
-                ..
-            } => {
-                let mut inputs = smallvec![*condition];
-                inputs.extend_from_slice(captured);
-                inputs
+            NodeKind::Gamma { inputs, .. } => {
+                let mut result = smallvec![inputs.condition];
+                result.extend_from_slice(&inputs.captured);
+                result
             }
-            NodeKind::Theta { initial_values, .. } => {
-                let mut inputs = smallvec![];
-                inputs.extend_from_slice(initial_values);
-                inputs
-            }
+            NodeKind::Theta { inputs, .. } => inputs.all_values().collect(),
             NodeKind::Parameter { .. } => smallvec![],
             NodeKind::StateToken => smallvec![],
             NodeKind::Const { .. } => smallvec![],
-            NodeKind::Binary { left, right, .. } => smallvec![*left, *right],
-            NodeKind::Unary { operand, .. } => smallvec![*operand],
-            NodeKind::Call { state, args, .. } => {
-                let mut inputs = smallvec![*state];
-                inputs.extend_from_slice(args);
-                inputs
+            NodeKind::Binary { inputs, .. } => smallvec![inputs.left, inputs.right],
+            NodeKind::Unary { inputs, .. } => smallvec![inputs.operand],
+            NodeKind::Call { inputs, .. } => {
+                let mut result = smallvec![inputs.state];
+                result.extend_from_slice(&inputs.args);
+                result
             }
-            NodeKind::Alloc { state, .. } => smallvec![*state],
-            NodeKind::Load { state, address, .. } => smallvec![*state, *address],
-            NodeKind::Store {
-                state,
-                address,
-                value,
-                ..
-            } => smallvec![*state, *address, *value],
+            NodeKind::Alloc { inputs, .. } => smallvec![inputs.state],
+            NodeKind::Load { inputs, .. } => smallvec![inputs.state, inputs.address],
+            NodeKind::Store { inputs, .. } => {
+                smallvec![inputs.state, inputs.address, inputs.value]
+            }
             NodeKind::RegionParam { .. } => smallvec![],
-            NodeKind::RegionResult { value } => smallvec![*value],
+            NodeKind::RegionResult { inputs } => smallvec![inputs.value],
         }
     }
 
@@ -169,6 +158,276 @@ impl Node {
             | NodeKind::RegionParam { .. } => false,
             _ => true,
         }
+    }
+}
+
+// ===== Input Structs for Type Safety =====
+
+/// Inputs for a Theta (loop) node
+///
+/// # Semantics
+/// - `state`: State token for effect ordering (always present)
+/// - `loop_vars`: Additional loop-carried variables (counters, accumulators, etc.)
+///   - Each value becomes a region parameter
+///   - Region must produce updated values in the same order
+///
+/// # Region Structure
+/// - Parameters: [state_param, ...loop_var_params]
+/// - Results: `[condition, state_updated, ...loop_vars_updated]`
+///   - First result: Boolean condition (continue if true)
+///   - Second result: Updated state token
+///   - Remaining results: Updated loop variables (same count and order as loop_vars)
+///
+/// # Example
+/// ```text
+/// while (i < 10) { i = i + 1; }
+///
+/// ThetaInputs {
+///     state: initial_state,
+///     loop_vars: [i_initial]
+/// }
+/// Region results: [i_param < 10, state_param, i_param + 1]
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ThetaInputs {
+    pub state: ValueId,
+    pub loop_vars: Vec<ValueId>,
+}
+
+impl ThetaInputs {
+    #[inline]
+    pub fn new(state: ValueId, loop_vars: Vec<ValueId>) -> Self {
+        Self { state, loop_vars }
+    }
+
+    /// Get all loop-carried values (state + loop vars) in order
+    #[inline]
+    pub fn all_values(&self) -> impl Iterator<Item = ValueId> + '_ {
+        std::iter::once(self.state).chain(self.loop_vars.iter().copied())
+    }
+
+    /// Total count of loop-carried values (state + loop vars)
+    #[inline]
+    pub fn len(&self) -> usize {
+        1 + self.loop_vars.len()
+    }
+
+    /// Validate this theta's inputs against its region
+    #[cfg(debug_assertions)]
+    pub fn validate(&self, region: &Region, _func: &Function) -> Result<(), String> {
+        // Check parameter count (state + loop vars)
+        let expected_params = 1 + self.loop_vars.len();
+        if region.params.len() != expected_params {
+            return Err(format!(
+                "Theta has {} loop-carried values (state + {} vars) but region has {} parameters",
+                expected_params,
+                self.loop_vars.len(),
+                region.params.len()
+            ));
+        }
+
+        // Check result count (1 condition + 1 state + N loop vars)
+        let expected_results = 1 + 1 + self.loop_vars.len();
+        if region.results.len() != expected_results {
+            return Err(format!(
+                "Theta region has {} results, expected {} (1 condition + 1 state + {} vars)",
+                region.results.len(),
+                expected_results,
+                self.loop_vars.len()
+            ));
+        }
+
+        // TODO: Check that first result is boolean type
+
+        Ok(())
+    }
+}
+
+/// Inputs for a Gamma (conditional/if-else) node
+///
+/// # Semantics
+/// - `condition`: Boolean value determining which region executes
+/// - `captured`: Values captured from outer scope and passed to all regions
+///
+/// # Region Structure
+/// - Each region receives the captured values as parameters
+/// - All regions must produce the same number and types of results
+///
+/// # Example
+/// ```text
+/// if (x < 5) { y } else { z }
+///
+/// GammaInputs {
+///     condition: x < 5,
+///     captured: [y, z]
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GammaInputs {
+    pub condition: ValueId,
+    pub captured: Vec<ValueId>,
+}
+
+impl GammaInputs {
+    #[inline]
+    pub fn new(condition: ValueId, captured: Vec<ValueId>) -> Self {
+        Self {
+            condition,
+            captured,
+        }
+    }
+
+    /// All inputs in the order expected by the region
+    #[inline]
+    pub fn all_inputs(&self) -> impl Iterator<Item = ValueId> + '_ {
+        std::iter::once(self.condition).chain(self.captured.iter().copied())
+    }
+}
+
+/// Inputs for a Binary operation node
+///
+/// # Semantics
+/// - `left`: Left operand
+/// - `right`: Right operand
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BinaryInputs {
+    pub left: ValueId,
+    pub right: ValueId,
+}
+
+impl BinaryInputs {
+    #[inline(always)]
+    pub const fn new(left: ValueId, right: ValueId) -> Self {
+        Self { left, right }
+    }
+}
+
+/// Inputs for a Unary operation node
+///
+/// # Semantics
+/// - `operand`: The value to operate on
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct UnaryInputs {
+    pub operand: ValueId,
+}
+
+impl UnaryInputs {
+    #[inline(always)]
+    pub const fn new(operand: ValueId) -> Self {
+        Self { operand }
+    }
+}
+
+/// Inputs for a Call node
+///
+/// # Semantics
+/// - `state`: State token for effect ordering
+/// - `args`: Function arguments
+///
+/// # Outputs
+/// - [new_state, result]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallInputs {
+    pub state: ValueId,
+    pub args: Vec<ValueId>,
+}
+
+impl CallInputs {
+    #[inline]
+    pub fn new(state: ValueId, args: Vec<ValueId>) -> Self {
+        Self { state, args }
+    }
+
+    /// All inputs in order: state first, then args
+    #[inline]
+    pub fn all_inputs(&self) -> impl Iterator<Item = ValueId> + '_ {
+        std::iter::once(self.state).chain(self.args.iter().copied())
+    }
+}
+
+/// Inputs for an Alloc (memory allocation) node
+///
+/// # Semantics
+/// - `state`: State token for effect ordering
+///
+/// # Outputs
+/// - [new_state, pointer]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct AllocInputs {
+    pub state: ValueId,
+}
+
+impl AllocInputs {
+    #[inline(always)]
+    pub const fn new(state: ValueId) -> Self {
+        Self { state }
+    }
+}
+
+/// Inputs for a Load (memory read) node
+///
+/// # Semantics
+/// - `state`: State token for effect ordering
+/// - `address`: Pointer to load from
+///
+/// # Outputs
+/// - [new_state, value]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LoadInputs {
+    pub state: ValueId,
+    pub address: ValueId,
+}
+
+impl LoadInputs {
+    #[inline(always)]
+    pub const fn new(state: ValueId, address: ValueId) -> Self {
+        Self { state, address }
+    }
+}
+
+/// Inputs for a Store (memory write) node
+///
+/// # Semantics
+/// - `state`: State token for effect ordering
+/// - `address`: Pointer to store to
+/// - `value`: Value to store
+///
+/// # Outputs
+/// - [new_state]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StoreInputs {
+    pub state: ValueId,
+    pub address: ValueId,
+    pub value: ValueId,
+}
+
+impl StoreInputs {
+    #[inline(always)]
+    pub const fn new(state: ValueId, address: ValueId, value: ValueId) -> Self {
+        Self {
+            state,
+            address,
+            value,
+        }
+    }
+}
+
+/// Inputs for a RegionResult node
+///
+/// # Semantics
+/// - `value`: The value to return from the region
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct RegionResultInputs {
+    pub value: ValueId,
+}
+
+impl RegionResultInputs {
+    #[inline(always)]
+    pub const fn new(value: ValueId) -> Self {
+        Self { value }
     }
 }
 
@@ -188,8 +447,7 @@ pub enum NodeKind {
     /// Contains: N regions (one per branch)
     Gamma {
         regions: Vec<RegionId>, // regions[0] = true branch, regions[1] = false branch
-        condition: ValueId,
-        captured: Vec<ValueId>,
+        inputs: GammaInputs,
     },
 
     /// Theta: Loop
@@ -197,7 +455,7 @@ pub enum NodeKind {
     /// Contains: Single region that's the loop body
     Theta {
         region: RegionId,
-        initial_values: Vec<ValueId>,
+        inputs: ThetaInputs,
     },
 
     // ===== Simple Nodes =====
@@ -219,44 +477,30 @@ pub enum NodeKind {
     },
 
     /// Binary operation
-    Binary {
-        op: BinaryOp,
-        left: ValueId,
-        right: ValueId,
-    },
+    Binary { op: BinaryOp, inputs: BinaryInputs },
 
     /// Unary operation
-    Unary { op: UnaryOp, operand: ValueId },
+    Unary { op: UnaryOp, inputs: UnaryInputs },
 
     /// Function call
     /// Outputs: [new_state, result]
     Call {
         function: FunctionId,
-        state: ValueId,
-        args: Vec<ValueId>,
+        inputs: CallInputs,
     },
 
     // ===== Memory Operations =====
     /// Allocate memory (heap or stack determined later)
     /// Outputs: [new_state, pointer]
-    Alloc { ty: TypeId, state: ValueId },
+    Alloc { ty: TypeId, inputs: AllocInputs },
 
     /// Load from memory
     /// Outputs: [new_state, value]
-    Load {
-        ty: TypeId,
-        state: ValueId,
-        address: ValueId,
-    },
+    Load { ty: TypeId, inputs: LoadInputs },
 
     /// Store to memory
     /// Outputs: [new_state]
-    Store {
-        ty: TypeId,
-        state: ValueId,
-        address: ValueId,
-        value: ValueId,
-    },
+    Store { ty: TypeId, inputs: StoreInputs },
 
     // ===== Region-specific Nodes =====
     /// Region parameter (input to a region)
@@ -266,7 +510,7 @@ pub enum NodeKind {
     },
 
     /// Region result (output from a region)
-    RegionResult { value: ValueId },
+    RegionResult { inputs: RegionResultInputs },
 }
 
 // ===== Constants =====
@@ -382,16 +626,7 @@ pub(crate) struct NodeKey {
 #[derive(Hash, Eq, PartialEq, Clone)]
 pub(crate) enum NodeKeyKind {
     Const(ConstValue),
-    Binary {
-        op: BinaryOp,
-        left: ValueId,
-        right: ValueId,
-    },
-    Unary {
-        op: UnaryOp,
-        operand: ValueId,
-    },
-    StructFieldAddr {
-        field: FieldId,
-    },
+    Binary { op: BinaryOp, inputs: BinaryInputs },
+    Unary { op: UnaryOp, inputs: UnaryInputs },
+    StructFieldAddr { field: FieldId },
 }

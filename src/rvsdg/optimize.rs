@@ -70,19 +70,12 @@ fn mark_node(func: &Function, node_id: NodeId, live: &mut FxHashSet<NodeId>) {
         NodeKind::Lambda { region } => {
             mark_region(func, *region, live);
         }
-        NodeKind::Gamma {
-            regions,
-            captured,
-            condition,
-        } => {
+        NodeKind::Gamma { regions, inputs: _ } => {
             for &region_id in regions {
                 mark_region(func, region_id, live);
             }
         }
-        NodeKind::Theta {
-            region,
-            initial_values,
-        } => {
+        NodeKind::Theta { region, inputs: _ } => {
             mark_region(func, *region, live);
         }
         _ => {}

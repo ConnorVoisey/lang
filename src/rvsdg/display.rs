@@ -115,16 +115,16 @@ impl Node {
                 display_region(out, func, *region, module, symbols, indent + 1)?;
                 writeln!(out, "{}}}", ind)?;
             }
-            NodeKind::Gamma {
-                regions,
-                captured,
-                condition,
-            } => {
+            NodeKind::Gamma { regions, inputs } => {
                 write!(
                     out,
                     "gamma (condition: {}, captured: ({})) ",
-                    value_name(func, condition.node, condition.output_index as usize),
-                    self.display_val_slice(captured, func)
+                    value_name(
+                        func,
+                        inputs.condition.node,
+                        inputs.condition.output_index as usize
+                    ),
+                    self.display_val_slice(&inputs.captured, func)
                 )?;
                 writeln!(out, " {{")?;
 
@@ -150,14 +150,12 @@ impl Node {
 
                 writeln!(out, "{}}}", ind)?;
             }
-            NodeKind::Theta {
-                region,
-                initial_values,
-            } => {
+            NodeKind::Theta { region, inputs } => {
                 write!(
                     out,
-                    "theta (intial_values: ({})) ",
-                    self.display_val_slice(initial_values, func)
+                    "theta (state: {}, loop_vars: [{}]) ",
+                    value_name(func, inputs.state.node, inputs.state.output_index as usize),
+                    self.display_val_slice(&inputs.loop_vars, func)
                 )?;
                 writeln!(out, " region:{} {{", region.0)?;
                 display_region(out, func, *region, module, symbols, indent + 1)?;
@@ -198,28 +196,28 @@ impl Node {
                     }
                 }
             }
-            NodeKind::Binary { op, left, right } => {
+            NodeKind::Binary { op, inputs } => {
                 writeln!(
                     out,
                     "{:?} (left: {}, right: {})",
                     op,
-                    value_name(func, left.node, left.output_index as usize),
-                    value_name(func, right.node, right.output_index as usize),
+                    value_name(func, inputs.left.node, inputs.left.output_index as usize),
+                    value_name(func, inputs.right.node, inputs.right.output_index as usize),
                 )?;
             }
-            NodeKind::Unary { op, operand } => {
+            NodeKind::Unary { op, inputs } => {
                 writeln!(
                     out,
                     "{:?} (operand: {})",
                     op,
-                    value_name(func, operand.node, operand.output_index as usize),
+                    value_name(
+                        func,
+                        inputs.operand.node,
+                        inputs.operand.output_index as usize
+                    ),
                 )?;
             }
-            NodeKind::Call {
-                state,
-                function,
-                args,
-            } => {
+            NodeKind::Call { function, inputs } => {
                 // Get the function name from the module
                 let func_name = if let Some(f) = module.functions.iter().find(|f| f.id == *function)
                 {
@@ -235,46 +233,49 @@ impl Node {
                     "call {} [id:{}] (state: {}, args: ({}))",
                     func_name,
                     function.0,
-                    value_name(func, state.node, state.output_index as usize),
-                    self.display_val_slice(args, func),
+                    value_name(func, inputs.state.node, inputs.state.output_index as usize),
+                    self.display_val_slice(&inputs.args, func),
                 )?;
             }
-            NodeKind::Alloc { ty, state } => {
+            NodeKind::Alloc { ty, inputs } => {
                 writeln!(
                     out,
                     "alloc {} (state: {})",
                     type_name(*ty, module),
-                    value_name(func, state.node, state.output_index as usize),
+                    value_name(func, inputs.state.node, inputs.state.output_index as usize),
                 )?;
             }
-            NodeKind::Load { ty, state, address } => {
+            NodeKind::Load { ty, inputs } => {
                 writeln!(
                     out,
                     "load {} (state: {}, address: {})",
                     type_name(*ty, module),
-                    value_name(func, state.node, state.output_index as usize),
-                    value_name(func, address.node, address.output_index as usize),
+                    value_name(func, inputs.state.node, inputs.state.output_index as usize),
+                    value_name(
+                        func,
+                        inputs.address.node,
+                        inputs.address.output_index as usize
+                    ),
                 )?;
             }
-            NodeKind::Store {
-                ty,
-                address,
-                state,
-                value,
-            } => {
+            NodeKind::Store { ty, inputs } => {
                 writeln!(
                     out,
                     "store {} (state: {}, address: {}, value: {})",
                     type_name(*ty, module),
-                    value_name(func, state.node, state.output_index as usize),
-                    value_name(func, address.node, address.output_index as usize),
-                    value_name(func, value.node, value.output_index as usize),
+                    value_name(func, inputs.state.node, inputs.state.output_index as usize),
+                    value_name(
+                        func,
+                        inputs.address.node,
+                        inputs.address.output_index as usize
+                    ),
+                    value_name(func, inputs.value.node, inputs.value.output_index as usize),
                 )?;
             }
             NodeKind::RegionParam { index } => {
                 writeln!(out, "region_param #{}", index)?;
             }
-            NodeKind::RegionResult { value } => {
+            NodeKind::RegionResult { inputs } => {
                 let region_id = func
                     .regions
                     .iter()
@@ -290,8 +291,8 @@ impl Node {
                     out,
                     "region_result:{} (value: {})",
                     region_str,
-                    value_name(func, value.node, value.output_index as usize),
-                );
+                    value_name(func, inputs.value.node, inputs.value.output_index as usize),
+                )?;
             }
         }
 

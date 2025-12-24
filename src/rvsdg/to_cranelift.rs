@@ -340,13 +340,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         let mut results = Vec::new();
         for &result_node_id in &region.results {
             let node = self.rvsdg_func.node(result_node_id);
-            if let NodeKind::RegionResult { value } = node.kind {
+            if let NodeKind::RegionResult { inputs } = node.kind {
                 // Skip void-typed results (state tokens)
-                let input_node = self.rvsdg_func.node(value.node);
-                let input_ty = input_node.output_types[value.output_index as usize];
+                let input_node = self.rvsdg_func.node(inputs.value.node);
+                let input_ty = input_node.output_types[inputs.value.output_index as usize];
 
                 if !matches!(self.module.types.kind(input_ty), TypeKind::Void) {
-                    results.push(self.get_value(value)?);
+                    results.push(self.get_value(inputs.value)?);
                 }
             }
         }
@@ -399,9 +399,9 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 );
                 Ok(Some(cl_val))
             }
-            NodeKind::Binary { op, left, right } => {
-                let lhs = self.get_value(*left)?;
-                let rhs = self.get_value(*right)?;
+            NodeKind::Binary { op, inputs } => {
+                let lhs = self.get_value(inputs.left)?;
+                let rhs = self.get_value(inputs.right)?;
 
                 let cl_val = match op {
                     BinaryOp::Add => self.builder.ins().iadd(lhs, rhs),
@@ -433,8 +433,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-            NodeKind::Unary { op, operand } => {
-                let operand = self.get_value(*operand)?;
+            NodeKind::Unary { op, inputs } => {
+                let operand = self.get_value(inputs.operand)?;
 
                 let cl_val = match op {
                     UnaryOp::Neg => self.builder.ins().ineg(operand),
@@ -454,11 +454,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(cl_val))
             }
-            NodeKind::Call {
-                function,
-                state,
-                args,
-            } => {
+            NodeKind::Call { function, inputs } => {
                 // Get the Cranelift function ID
                 let cl_func_id = *self.func_map.get(function).ok_or_else(|| {
                     color_eyre::eyre::eyre!("Function {:?} not found in func_map", function)
@@ -470,7 +466,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .declare_func_in_func(cl_func_id, self.builder.func);
 
                 // First input is state token (skip it), rest are actual arguments
-                let args: Vec<Value> = args
+                let args: Vec<Value> = inputs
+                    .args
                     .iter()
                     .map(|&value_id| self.get_value(value_id))
                     .collect::<color_eyre::Result<Vec<_>>>()?;
@@ -496,17 +493,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-            NodeKind::Gamma {
-                regions,
-                condition,
-                captured,
-            } => {
+            NodeKind::Gamma { regions, inputs } => {
                 // Gamma: conditional branch (if/else)
                 // Inputs: [condition, ...captured_values]
                 // Outputs: merged results from all branches
 
                 // Get the condition value
-                let condition = self.get_value(*condition)?;
+                let condition = self.get_value(inputs.condition)?;
 
                 // Create blocks for each region (typically 2: true and false)
                 let mut region_blocks = Vec::new();
@@ -558,7 +551,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                     // Get captured values (skip first input which is condition)
                     // Also skip void types (state tokens) since they don't have Cranelift representation
-                    let captured_inputs: Vec<Value> = captured
+                    let captured_inputs: Vec<Value> = inputs
+                        .captured
                         .iter()
                         .filter_map(|&vid| {
                             // Check if this is a void type
@@ -612,10 +606,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(None)
             }
-            NodeKind::Theta {
-                region,
-                initial_values,
-            } => {
+            NodeKind::Theta { region, inputs } => {
                 // Theta: loop construct
                 // Inputs: [...initial_values]
                 // Region outputs: [condition, ...updated_values]
@@ -643,9 +634,18 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 }
 
                 // Get initial values (only non-void ones, matching non_void_output_indices)
-                let initial_values: Vec<Value> = initial_values
-                    .iter()
-                    .map(|value_id| self.get_value(*value_id))
+                // State tokens (void type) don't have Cranelift representations, so skip them
+                let initial_values: Vec<Value> = inputs
+                    .all_values()
+                    .filter_map(|value_id| {
+                        let value_node = self.rvsdg_func.node(value_id.node);
+                        let value_ty = value_node.output_types[value_id.output_index as usize];
+                        if matches!(self.module.types.kind(value_ty), TypeKind::Void) {
+                            None // Skip void types (state tokens)
+                        } else {
+                            Some(self.get_value(value_id))
+                        }
+                    })
                     .collect::<color_eyre::Result<Vec<_>>>()?;
 
                 // Jump to header with initial values
@@ -680,11 +680,9 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 let condition = region_results[0];
 
-                // Filter updated values to only include non-void ones
-                let updated_values: Vec<Value> = non_void_output_indices
-                    .iter()
-                    .map(|&(idx, _)| region_results[idx + 1]) // +1 because first result is condition
-                    .collect();
+                // Updated values are all region results except the first (condition)
+                // They're already filtered to exclude void types in compile_region
+                let updated_values: Vec<Value> = region_results[1..].to_vec();
 
                 // Branch: if condition is true, jump back to header, else exit
                 let updated_args: Vec<_> =
@@ -725,7 +723,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 // Lambda nodes are structural and handled separately
                 Ok(None)
             }
-            NodeKind::Alloc { ty, state: _ } => {
+            NodeKind::Alloc { ty, inputs: _ } => {
                 // Allocate memory (stack allocation for now)
                 // Inputs: [state]
                 // Outputs: [new_state, pointer]
@@ -750,12 +748,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(ptr))
             }
-            NodeKind::Load {
-                ty,
-                address,
-                state: _,
-            } => {
-                let ptr = self.get_value(*address)?;
+            NodeKind::Load { ty, inputs } => {
+                let ptr = self.get_value(inputs.address)?;
 
                 let cl_type = type_to_cl(self.module.types, *ty).ok_or_else(|| {
                     color_eyre::eyre::eyre!(
@@ -775,15 +769,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
                 Ok(Some(value))
             }
-            NodeKind::Store {
-                ty,
-                address,
-                value,
-                state: _,
-            } => {
-                let ptr = self.get_value(*address)?;
+            NodeKind::Store { ty, inputs } => {
+                let ptr = self.get_value(inputs.address)?;
 
-                let value_to_store = self.get_value(*value)?;
+                let value_to_store = self.get_value(inputs.value)?;
 
                 self.builder
                     .ins()

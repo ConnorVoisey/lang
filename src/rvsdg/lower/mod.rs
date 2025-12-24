@@ -17,6 +17,8 @@ use crate::{
     types::{TypeArena, TypeKind},
 };
 
+pub mod theta;
+
 pub struct AstLowering<'a> {
     ast: &'a Ast,
     types: &'a TypeArena,
@@ -381,31 +383,36 @@ impl<'a> AstLowering<'a> {
             Op::LessThan { left, right } => {
                 let lhs = self.lower_expr(builder, left)?;
                 let rhs = self.lower_expr(builder, right)?;
-                Some(builder.binary(BinaryOp::Lt, lhs, rhs, ty, span))
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Lt, lhs, rhs, self.types.bool_type, span))
             }
 
             Op::LessThanEq { left, right } => {
                 let lhs = self.lower_expr(builder, left)?;
                 let rhs = self.lower_expr(builder, right)?;
-                Some(builder.binary(BinaryOp::Le, lhs, rhs, ty, span))
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Le, lhs, rhs, self.types.bool_type, span))
             }
 
             Op::GreaterThan { left, right } => {
                 let lhs = self.lower_expr(builder, left)?;
                 let rhs = self.lower_expr(builder, right)?;
-                Some(builder.binary(BinaryOp::Gt, lhs, rhs, ty, span))
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Gt, lhs, rhs, self.types.bool_type, span))
             }
 
             Op::GreaterThanEq { left, right } => {
                 let lhs = self.lower_expr(builder, left)?;
                 let rhs = self.lower_expr(builder, right)?;
-                Some(builder.binary(BinaryOp::Ge, lhs, rhs, ty, span))
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Ge, lhs, rhs, self.types.bool_type, span))
             }
 
             Op::Equivalent { left, right } => {
                 let lhs = self.lower_expr(builder, left)?;
                 let rhs = self.lower_expr(builder, right)?;
-                Some(builder.binary(BinaryOp::Eq, lhs, rhs, ty, span))
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Eq, lhs, rhs, self.types.bool_type, span))
             }
 
             Op::Neg(operand) => {
@@ -779,87 +786,6 @@ impl<'a> AstLowering<'a> {
                 _ => {}
             }
         }
-    }
-
-    fn lower_while_loop(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        condition: &AstExpr,
-        body: &AstBlock,
-        span: Span,
-    ) -> Option<ValueId> {
-        // For while loops with theta nodes, the pattern is:
-        // theta [initial_state, initial_vars...] {
-        //   region params: [state, vars...]
-        //   ... loop body ...
-        //   cond = evaluate condition
-        //   results: [cond, new_state, updated_vars...]
-        // }
-
-        // Start with just state as the loop-carried value
-        // TODO: Track all variables modified in the loop body
-        let initial_state = self.current_state.expect("State not initialized");
-        let initial_values = vec![initial_state];
-
-        // Get output types (state type + any other loop vars)
-        let state_ty = self.types.void_type;
-        let output_types = vec![state_ty];
-
-        // Create theta node
-        let (theta_node, theta_region) =
-            builder.create_theta(initial_values, output_types, span.clone());
-
-        // Get the region parameter nodes (created by create_theta)
-        let theta_param_nodes: Vec<NodeId> = builder.get_region(theta_region).params.clone();
-
-        // Save the current state before entering the loop
-        let outer_state = self.current_state;
-
-        // Start building in the theta region
-        builder.start_region(theta_region);
-
-        // Map the state parameter
-        let loop_state = ValueId {
-            node: theta_param_nodes[0],
-            output_index: 0,
-        };
-        self.current_state = Some(loop_state);
-
-        // Lower the loop body
-        let _body_result = self.lower_block(builder, body);
-
-        // Evaluate the condition
-        let cond_value = self.lower_expr(builder, condition)?;
-
-        // Create region results: [condition, final_state]
-        let final_state = self.current_state.expect("State should still be set");
-
-        // First result is the continuation condition
-        builder.region_result(cond_value, span.clone());
-
-        // Remaining results are the updated loop-carried values (state)
-        builder.region_result(final_state, span.clone());
-
-        builder.end_region();
-
-        // Restore outer state - after loop, we have the final state from theta
-        // The theta node's first output (index 0) is the final state value
-        self.current_state = Some(ValueId {
-            node: theta_node,
-            output_index: 0,
-        });
-
-        // Restore outer scope's state context
-        // Actually, we should use the state from after the loop
-        // theta outputs: [final_state]
-        // We already set current_state above
-
-        // While loops don't produce a value in our language (they're statements)
-        // But we return the theta node reference for consistency
-        Some(ValueId {
-            node: theta_node,
-            output_index: 0,
-        })
     }
 
     fn lower_struct_field_access(

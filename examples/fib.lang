@@ -14,7 +14,6 @@ fn fib(n Int) Int {
 }
 
 fn main() Int {
-    printf(&c"%d
-", fib(43));
+    printf(&c"%d\n", fib(43));
     0
 }

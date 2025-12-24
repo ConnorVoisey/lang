@@ -12,7 +12,6 @@ fn main() Int {
         num = num + 1;
     }
 
-    printf(&c"%d
-", num);
+    printf(&c"%d\n", num);
     0
 }

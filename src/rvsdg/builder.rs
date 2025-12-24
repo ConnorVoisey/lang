@@ -263,12 +263,9 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Step 3: Check cache
+        let inputs = BinaryInputs::new(lhs, rhs);
         let key = NodeKey {
-            kind: NodeKeyKind::Binary {
-                op,
-                left: lhs,
-                right: rhs,
-            },
+            kind: NodeKeyKind::Binary { op, inputs },
             output_types: vec![result_ty],
         };
 
@@ -277,15 +274,7 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Step 4: Create new node
-        let node = self.alloc_node(
-            NodeKind::Binary {
-                op,
-                left: lhs,
-                right: rhs,
-            },
-            vec![result_ty],
-            span,
-        );
+        let node = self.alloc_node(NodeKind::Binary { op, inputs }, vec![result_ty], span);
 
         // Step 5: Cache it
         self.value_cache.insert(key, node);
@@ -305,8 +294,9 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Step 2: Check cache
+        let inputs = UnaryInputs::new(operand);
         let key = NodeKey {
-            kind: NodeKeyKind::Unary { op, operand },
+            kind: NodeKeyKind::Unary { op, inputs },
             output_types: vec![result_ty],
         };
 
@@ -315,7 +305,7 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         // Step 3: Create new node
-        let node = self.alloc_node(NodeKind::Unary { op, operand }, vec![result_ty], span);
+        let node = self.alloc_node(NodeKind::Unary { op, inputs }, vec![result_ty], span);
 
         // Step 4: Cache it
         self.value_cache.insert(key, node);
@@ -325,8 +315,9 @@ impl<'a> FunctionBuilder<'a> {
     // ===== Memory Operations =====
 
     pub fn alloc(&mut self, state: ValueId, ty: TypeId, span: Span) -> AllocOutputs {
+        let inputs = AllocInputs::new(state);
         let node = self.alloc_node(
-            NodeKind::Alloc { ty, state },
+            NodeKind::Alloc { ty, inputs },
             vec![ty, ty], // [new_state, pointer]
             span,
         );
@@ -338,12 +329,9 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn load(&mut self, state: ValueId, addr: ValueId, ty: TypeId, span: Span) -> LoadOutputs {
         let state_ty = ty; // State type is same as loaded type for simplicity
+        let inputs = LoadInputs::new(state, addr);
         let node = self.alloc_node(
-            NodeKind::Load {
-                ty,
-                state,
-                address: addr,
-            },
+            NodeKind::Load { ty, inputs },
             vec![state_ty, ty], // [new_state, value]
             span,
         );
@@ -361,13 +349,9 @@ impl<'a> FunctionBuilder<'a> {
         ty: TypeId,
         span: Span,
     ) -> StoreOutputs {
+        let inputs = StoreInputs::new(state, addr, value);
         let node = self.alloc_node(
-            NodeKind::Store {
-                ty,
-                state,
-                address: addr,
-                value,
-            },
+            NodeKind::Store { ty, inputs },
             vec![ty], // [new_state]
             span,
         );
@@ -387,12 +371,9 @@ impl<'a> FunctionBuilder<'a> {
         return_ty: TypeId,
         span: Span,
     ) -> CallOutputs {
+        let inputs = CallInputs::new(state, args);
         let node = self.alloc_node(
-            NodeKind::Call {
-                function,
-                state,
-                args,
-            },
+            NodeKind::Call { function, inputs },
             vec![state_ty, return_ty], // [new_state, result]
             span,
         );
@@ -448,7 +429,8 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn region_result(&mut self, value: ValueId, span: Span) -> NodeId {
         let ty = value.node; // Placeholder - we'd need to track types properly
-        let node = self.alloc_node(NodeKind::RegionResult { value }, vec![], span);
+        let inputs = RegionResultInputs::new(value);
+        let node = self.alloc_node(NodeKind::RegionResult { inputs }, vec![], span);
 
         // Add to current region's results
         if let Some(region_id) = self.current_region {
@@ -495,12 +477,12 @@ impl<'a> FunctionBuilder<'a> {
         }
 
         let regions = vec![true_region, false_region];
+        let inputs = GammaInputs::new(condition, captured);
 
         let node = self.alloc_node(
             NodeKind::Gamma {
                 regions: regions.clone(),
-                condition,
-                captured,
+                inputs,
             },
             output_types,
             span,
@@ -517,6 +499,10 @@ impl<'a> FunctionBuilder<'a> {
     ) -> (NodeId, RegionId) {
         let region = self.new_region();
 
+        // First value is always the state token, remaining are loop vars
+        let state = initial_values[0];
+        let loop_vars = initial_values[1..].to_vec();
+
         // Create region parameters for loop-carried values with their actual types
         for (i, &initial_val) in initial_values.iter().enumerate() {
             let initial_node = &self.func.nodes[initial_val.node.0];
@@ -530,14 +516,8 @@ impl<'a> FunctionBuilder<'a> {
             self.regions[region.0].params.push(param);
         }
 
-        let node = self.alloc_node(
-            NodeKind::Theta {
-                region,
-                initial_values,
-            },
-            output_types,
-            span,
-        );
+        let inputs = ThetaInputs::new(state, loop_vars);
+        let node = self.alloc_node(NodeKind::Theta { region, inputs }, output_types, span);
 
         (node, region)
     }
@@ -579,6 +559,19 @@ impl<'a> FunctionBuilder<'a> {
             }
         }
         None
+    }
+
+    /// Get all symbols in the current scope (for loop variable tracking)
+    pub fn current_scope_symbols(&self) -> Vec<(SymbolId, ValueId)> {
+        self.symbol_map
+            .last()
+            .map(|scope| scope.iter().map(|(&k, &v)| (k, v)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get the function being built (for type lookups)
+    pub fn get_func(&self) -> &Function {
+        &self.func
     }
 
     // ===== Hash-Consing Helpers =====
