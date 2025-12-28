@@ -132,7 +132,7 @@ impl<'a> StructLayoutInfo<'a> {
                     .expect("Struct layout must be computed before use, should have been covered in topological sort");
                 (layout.size, layout.alignment)
             }
-            TypeKind::Enum(enum_id) => {
+            TypeKind::Enum(_enum_id) => {
                 todo!("Handle enums inside of structs")
                 // let layout = self
                 //     .get(*enum_id)

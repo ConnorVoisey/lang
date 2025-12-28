@@ -44,7 +44,13 @@ pub enum TypeKind {
 #[derive(Debug, Clone)]
 pub struct TypeKindStruct {
     pub struct_id: StructId,
-    pub fields: Vec<(crate::interner::IdentId, TypeId)>,
+    pub fields: Vec<(IdentId, TypeId)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeKindEnum {
+    pub enum_id: EnumId,
+    pub variants: Vec<(IdentId, TypeId)>,
 }
 
 #[derive(Debug)]
@@ -54,6 +60,9 @@ pub struct TypeArena {
     rank: Vec<u32>,      // union–find ranks for balancing
     pub struct_symbol_to_type: Vec<Option<TypeId>>,
     pub struct_field_types: Vec<Vec<(IdentId, TypeId)>>,
+
+    pub enum_symbol_to_type: Vec<Option<TypeId>>,
+    pub enum_variants: Vec<Vec<(IdentId, TypeId)>>,
 
     // Cached primitive types
     pub int_type: TypeId,
@@ -77,6 +86,9 @@ impl TypeArena {
             rank: Vec::new(),
             struct_symbol_to_type: Vec::new(),
             struct_field_types: Vec::new(),
+
+            enum_variants: Vec::new(),
+            enum_symbol_to_type: Vec::new(),
             // Initialize with dummy values, will be set below
             int_type: TypeId(0),
             uint_type: TypeId(0),
@@ -354,5 +366,13 @@ impl TypeArena {
 
     pub fn set_struct_fields(&mut self, struct_id: StructId, fields: Vec<(IdentId, TypeId)>) {
         self.struct_field_types.insert(struct_id.0, fields);
+    }
+
+    pub fn get_enum_variants(&self, enum_id: EnumId) -> &Vec<(IdentId, TypeId)> {
+        &self.enum_variants[enum_id.0]
+    }
+
+    pub fn set_enum_variants(&mut self, enum_id: EnumId, fields: Vec<(IdentId, TypeId)>) {
+        self.enum_variants.insert(enum_id.0, fields);
     }
 }

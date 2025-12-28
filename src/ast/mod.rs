@@ -260,6 +260,9 @@ impl Ast {
                 TokenKind::StructKeyWord => {
                     ast.parse_struct(symbols);
                 }
+                TokenKind::EnumKeyWord => {
+                    ast.parse_enum(symbols);
+                }
                 TokenKind::FnKeyWord => {
                     ast.parse_fn(symbols);
                 }

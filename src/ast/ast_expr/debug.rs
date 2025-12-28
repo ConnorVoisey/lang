@@ -72,6 +72,10 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
+                Op::DoubleColon { left, right } => DebugOp::DoubleColon {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
                 Op::Block(block) => DebugOp::Block {
                     statements: block
                         .statements
@@ -254,6 +258,10 @@ pub enum DebugOp {
         args: Vec<DebugExprKind>,
     },
     Dot {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
+    DoubleColon {
         left: DebugExprKind,
         right: DebugExprKind,
     },

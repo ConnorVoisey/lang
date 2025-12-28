@@ -442,6 +442,11 @@ impl<'a> AstLowering<'a> {
                 // Struct field access
                 self.lower_struct_field_access(builder, left, right, span)
             }
+            Op::DoubleColon { left, right } => {
+                todo!()
+                // enum variant access
+                // TODO: implement this
+            }
 
             Op::StructCreate {
                 ident,

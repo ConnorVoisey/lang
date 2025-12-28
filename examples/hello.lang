@@ -6,12 +6,18 @@ extern "C" {
     fn printf(fmt &CStr, param Int, param2 Int) Int;
 }
 
+enum Res {
+    Ok,
+    Err,
+}
+
 struct Pos {
     x Int,
     y Int,
 }
 
 fn main() Int {
+    let res = Res::Ok;
     let pos = Pos { x: 5, y: 100 };
     printf(&c"pos: { x: %d, y: %d }\n", pos.x, pos.y);
 

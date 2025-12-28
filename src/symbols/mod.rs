@@ -353,6 +353,7 @@ impl SymbolTable {
                 | Op::GreaterThan { left, right }
                 | Op::GreaterThanEq { left, right }
                 | Op::Dot { left, right }
+                | Op::DoubleColon { left, right }
                 | Op::Equivalent { left, right }
                 | Op::BracketOpen { left, right } => {
                     self.register_expr(left);

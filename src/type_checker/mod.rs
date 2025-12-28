@@ -577,6 +577,37 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = type_id;
                         type_id
                     }
+                    Op::DoubleColon { left, right } => {
+                        // currently `::` is only for enum variants
+                        let type_id = self
+                            .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
+                            .unwrap();
+                        let expected_fields = match self.arena.kind(type_id) {
+                            TypeKind::Enum(enum_id) => self.arena.get_enum_variants(*enum_id),
+                            _ => {
+                                self.errors.push(TypeCheckingError::Mismatch {
+                                    type_a_str: "enum".to_string(),
+                                    type_a_span: left.span.clone(),
+                                    type_b_str: self.arena.id_to_string(type_id),
+                                    type_b_span: left.span.clone(),
+                                });
+                                return None;
+                            }
+                        };
+                        let type_id = match right.kind {
+                            ExprKind::Atom(Atom::Ident((ident_id, _))) => {
+                                let found_field = expected_fields.iter().find(|f| f.0 == ident_id);
+                                found_field.map(|f| f.1)
+                            }
+                            _ => {
+                                todo!(
+                                    "could not find field in this struct with this ident, add error handling herre"
+                                )
+                            }
+                        };
+                        expr.type_id = type_id;
+                        type_id
+                    }
                     Op::Block(ast_block) => {
                         let type_id =
                             self.check_block(ast_block, return_type_id, fn_symbol_id, inside_loop);

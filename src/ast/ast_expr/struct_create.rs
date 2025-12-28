@@ -2,7 +2,6 @@ use crate::{
     ast::{
         Ast,
         ast_expr::{AstExpr, ExprKind, Op},
-        error::AstParseError,
     },
     lexer::{Span, Token, TokenKind},
     symbols::SymbolTable,
@@ -59,7 +58,7 @@ impl Ast {
                             self.next_token();
                         }
                     }
-                    t => {
+                    _t => {
                         dbg!(self.curr_token(), self.peek_token(),);
                         todo!();
                     }

@@ -72,6 +72,10 @@ pub enum Op {
         left: AstExpr,
         right: AstExpr,
     },
+    DoubleColon {
+        left: AstExpr,
+        right: AstExpr,
+    },
     Block(AstBlock),
     Equivalent {
         left: AstExpr,
@@ -395,6 +399,14 @@ impl Ast {
                             type_id: None,
                         }),
                     },
+                    TokenKind::DoubleColon => Op::DoubleColon {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
                     TokenKind::Equivalent => Op::Equivalent {
                         left: lhs?,
                         right: rhs.unwrap_or(AstExpr {
@@ -509,6 +521,7 @@ fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
 
         // Dot operator - same level as postfix operators, left-associative
         TokenKind::Dot => Some((13, 14)),
+        TokenKind::DoubleColon => Some((13, 14)),
 
         _ => None,
     }
@@ -662,6 +675,24 @@ mod test {
                 right: DebugExprKind::Atom(DebugAtom::Ident("baz".to_string())),
             })),
             right: DebugExprKind::Atom(DebugAtom::Ident("qux".to_string())),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn chained_double_colons() {
+        let debug_expr = parse_debug("foo::bar::baz::last;");
+        // `::` should have the same parsing rules as `.`, TODO: add test with both `::` and `.`
+        // parsing in one expression
+        let expected = DebugExprKind::Op(Box::new(DebugOp::DoubleColon {
+            left: DebugExprKind::Op(Box::new(DebugOp::DoubleColon {
+                left: DebugExprKind::Op(Box::new(DebugOp::DoubleColon {
+                    left: DebugExprKind::Atom(DebugAtom::Ident("foo".to_string())),
+                    right: DebugExprKind::Atom(DebugAtom::Ident("bar".to_string())),
+                })),
+                right: DebugExprKind::Atom(DebugAtom::Ident("baz".to_string())),
+            })),
+            right: DebugExprKind::Atom(DebugAtom::Ident("last".to_string())),
         }));
         assert_eq!(debug_expr, expected);
     }

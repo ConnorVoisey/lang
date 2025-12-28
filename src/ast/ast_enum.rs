@@ -140,7 +140,7 @@ impl Ast {
             end: self.tokens[self.curr_token_i()].span.end,
         };
         let ident_span = self.tokens[ident_token_at].span.clone();
-        let field_count = variants.len();
+        let _field_count = variants.len();
         let enum_id = EnumId(self.enums.len());
         let enum_val = AstEnum {
             ident_id,
@@ -184,7 +184,7 @@ mod test {
 
     #[test]
     fn basic_enum() {
-        let (mut ast, mut symbols) = parse_debug_setup("enum Foo { Bar, Baz }");
+        let (mut ast, mut symbols) = parse_debug_setup("enum Foo { Bar, Baz, }");
         ast.next_token();
         ast.parse_enum(&mut symbols);
         assert_eq!(
