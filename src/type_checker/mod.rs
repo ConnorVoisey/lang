@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use crate::{
     ast::{
         Ast,
@@ -204,9 +206,11 @@ impl<'a> TypeChecker<'a> {
                 Some(explicit_return_type)
             }
             StatementKind::BlockReturn { expr, is_fn_return } => {
-                let block_return_id = self
-                    .check_expr(expr, return_type_id, fn_symbol_id, inside_loop)
-                    .unwrap();
+                let block_return_id =
+                    match self.check_expr(expr, return_type_id, fn_symbol_id, inside_loop) {
+                        Some(type_id) => type_id,
+                        None => return None,
+                    };
                 if *is_fn_return
                     && self
                         .arena
@@ -450,17 +454,21 @@ impl<'a> TypeChecker<'a> {
                         else_ifs,
                         unconditional_else,
                     } => {
-                        let cond_type = self
-                            .check_expr(condition, return_type_id, fn_symbol_id, inside_loop)
-                            .expect("if condition did not have a type");
-
-                        // Ensure condition is Bool
+                        // Ensure condition, and else if conditions is Bool
                         let bool_type = self.arena.bool_type;
-                        if self.arena.unify(cond_type, bool_type).is_err() {
-                            self.errors.push(TypeCheckingError::IfConditionNotBool {
-                                got_type_str: self.arena.id_to_string(cond_type),
-                                condition_span: condition.span.clone(),
-                            });
+                        for cond in once(&mut *condition)
+                            .chain(else_ifs.iter_mut().map(|else_if| &mut else_if.0))
+                        {
+                            let cond_type = self
+                                .check_expr(cond, return_type_id, fn_symbol_id, inside_loop)
+                                .expect("if condition did not have a type");
+
+                            if self.arena.unify(cond_type, bool_type).is_err() {
+                                self.errors.push(TypeCheckingError::IfConditionNotBool {
+                                    got_type_str: self.arena.id_to_string(cond_type),
+                                    condition_span: cond.span.clone(),
+                                });
+                            }
                         }
 
                         // all blocks must return the same value
@@ -522,12 +530,9 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = if_block_return_id;
                         if_block_return_id
                     }
-                    Op::Equivalent { left, right }
-                    | Op::LessThan { left, right }
-                    | Op::LessThanEq { left, right }
-                    | Op::GreaterThan { left, right }
-                    | Op::GreaterThanEq { left, right } => {
-                        let int_type = self.arena.int_type;
+                    Op::Equivalent { left, right } => {
+                        // TODO: this block and the op less than block are duplicated with
+                        // different types, abstract these to reduce the boiler plate
                         let left_type_id = self
                             .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
                             .expect("left hand side of comparison expression did not have a type");
@@ -535,8 +540,30 @@ impl<'a> TypeChecker<'a> {
                             .check_expr(right, return_type_id, fn_symbol_id, inside_loop)
                             .expect("right hand side of comparison expression did not have a type");
 
-                        if self.arena.unify(left_type_id, int_type).is_err()
-                            || self.arena.unify(right_type_id, int_type).is_err()
+                        if self.arena.unify(left_type_id, right_type_id).is_err() {
+                            self.errors.push(TypeCheckingError::ComparisonTypeMismatch {
+                                left_type_str: self.arena.id_to_string(left_type_id),
+                                left_span: left.span.clone(),
+                                right_type_str: self.arena.id_to_string(right_type_id),
+                                right_span: right.span.clone(),
+                            });
+                        }
+                        Some(self.arena.bool_type)
+                    }
+                    Op::LessThan { left, right }
+                    | Op::LessThanEq { left, right }
+                    | Op::GreaterThan { left, right }
+                    | Op::GreaterThanEq { left, right } => {
+                        let expected_type = self.arena.int_type;
+                        let left_type_id = self
+                            .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
+                            .expect("left hand side of comparison expression did not have a type");
+                        let right_type_id = self
+                            .check_expr(right, return_type_id, fn_symbol_id, inside_loop)
+                            .expect("right hand side of comparison expression did not have a type");
+
+                        if self.arena.unify(left_type_id, expected_type).is_err()
+                            || self.arena.unify(right_type_id, expected_type).is_err()
                         {
                             self.errors.push(TypeCheckingError::ComparisonTypeMismatch {
                                 left_type_str: self.arena.id_to_string(left_type_id),
@@ -665,12 +692,19 @@ impl<'a> TypeChecker<'a> {
                                 }
                             }
                         }
-                        let size = args.len();
-                        expr.type_id = Some(self.arena.make(TypeKind::Array {
-                            size,
-                            inner_type: type_id.unwrap(),
-                        }));
-                        expr.type_id
+                        if type_id.is_none() {
+                            self.errors.push(TypeCheckingError::ArrayNoInnerType {
+                                creation_span: expr.span.clone(),
+                            });
+                            Some(self.arena.become_type)
+                        } else {
+                            let size = args.len();
+                            expr.type_id = Some(self.arena.make(TypeKind::Array {
+                                size,
+                                inner_type: type_id.unwrap(),
+                            }));
+                            expr.type_id
+                        }
                     }
                     Op::BracketOpen { left: _, right: _ } => todo!(),
                     Op::StructCreate {
@@ -1501,7 +1535,13 @@ mod test {
         let result = TypeCheckTestCase::from_source(
             r#"
             fn main() Int {
-                if true { 1 } else if 5 { 2 } else { 3 }
+                if true {
+                    1 
+                } else if 5 {
+                    2
+                } else { 
+                    3
+                }
             }
         "#,
         )
@@ -2275,8 +2315,7 @@ mod test {
         "#,
         )
         .check();
-        // This might fail or succeed depending on how empty arrays are handled
-        // Just checking it doesn't panic
+        result.assert_has_error(|e| matches!(e, TypeCheckingError::ArrayNoInnerType { .. }));
     }
 
     #[test]
@@ -2591,7 +2630,20 @@ mod test {
         let result = TypeCheckTestCase::from_source(
             r#"
             fn main() Bool {
-                (1 < 2) >= (3 > 4)
+                (1 < 2) == (4 > 3)
+            }
+        "#,
+        )
+        .check();
+        result.assert_no_errors();
+    }
+
+    #[test]
+    fn test_boolean_expression() {
+        let result = TypeCheckTestCase::from_source(
+            r#"
+            fn main() Bool {
+                true == false
             }
         "#,
         )

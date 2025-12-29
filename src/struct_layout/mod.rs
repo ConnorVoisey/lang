@@ -141,6 +141,9 @@ impl<'a> StructLayoutInfo<'a> {
             }
             TypeKind::Fn { .. } => (8, 8), // function pointer
             TypeKind::Unknown => {
+                panic!("Cannot compute size of Become - should be resolved by type checker")
+            }
+            TypeKind::Become => {
                 panic!("Cannot compute size of Unknown - should be resolved by type checker")
             }
             TypeKind::Var => {

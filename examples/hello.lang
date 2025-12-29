@@ -17,7 +17,9 @@ struct Pos {
 }
 
 fn main() Int {
-    let res = Res::Ok;
+    // This is a work in progress
+    // let res = Res::Ok;
+
     let pos = Pos { x: 5, y: 100 };
     printf(&c"pos: { x: %d, y: %d }\n", pos.x, pos.y);
 

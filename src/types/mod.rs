@@ -34,6 +34,8 @@ pub enum TypeKind {
     },
     Ref(TypeId),
     Unknown,
+    // type that accepts anything when merging, however it must be merged before usage
+    Become,
     // Type variables are just IDs managed by union–find
     Var,
 
@@ -71,6 +73,7 @@ pub struct TypeArena {
     pub str_type: TypeId,
     pub cstr_type: TypeId,
     pub void_type: TypeId,
+    pub become_type: TypeId,
 }
 
 #[derive(Debug)]
@@ -96,6 +99,7 @@ impl TypeArena {
             str_type: TypeId(0),
             cstr_type: TypeId(0),
             void_type: TypeId(0),
+            become_type: TypeId(0),
         };
 
         // Allocate primitive types once
@@ -105,6 +109,7 @@ impl TypeArena {
         arena.str_type = arena.make(TypeKind::Str);
         arena.cstr_type = arena.make(TypeKind::CStr);
         arena.void_type = arena.make(TypeKind::Void);
+        arena.become_type = arena.make(TypeKind::Void);
 
         arena
     }
@@ -348,6 +353,7 @@ impl TypeArena {
             TypeKind::Fn { .. } => "Fn".to_string(),
             TypeKind::Ref(type_id) => format!("&{}", self.kind_to_string(self.kind(*type_id))),
             TypeKind::Unknown => "Unknown".to_string(),
+            TypeKind::Become => "Become".to_string(),
             TypeKind::Var => "Var".to_string(),
             TypeKind::State => "State".to_string(),
         }

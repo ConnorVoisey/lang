@@ -252,7 +252,9 @@ impl SymbolTable {
                             SymbolKind::Fn(_) => todo!(),
                             SymbolKind::FnArg(_) => todo!(),
                             SymbolKind::Var(_) => todo!(),
-                            SymbolKind::Struct(_) => todo!(),
+                            SymbolKind::Struct(struct_symbol) => {
+                                TypeKind::Struct(struct_symbol.struct_id)
+                            }
                             SymbolKind::Enum(_) => todo!(),
                         }
                     }
@@ -430,7 +432,21 @@ impl ToTypeKind for VarType {
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
             VarType::CChar => todo!(),
-            VarType::Custom(_) => todo!(),
+            VarType::Custom((_, symbol_id_opt)) => {
+                let symbol_id = match symbol_id_opt {
+                    Some(symbol_id) => symbol_id,
+                    None => todo!(),
+                };
+                match &symbols.resolve(*symbol_id).kind {
+                    SymbolKind::Fn(fn_symbol_data) => todo!(),
+                    SymbolKind::FnArg(fn_arg_symbol_data) => todo!(),
+                    SymbolKind::Var(var_symbol_data) => todo!(),
+                    SymbolKind::Struct(struct_symbol_data) => {
+                        TypeKind::Struct(struct_symbol_data.struct_id)
+                    }
+                    SymbolKind::Enum(enum_symbol_data) => todo!(),
+                }
+            }
             VarType::Ref(var_type) => TypeKind::Ref(types.var_type_to_typeid(var_type, symbols)),
             VarType::Array { var_type, count } => TypeKind::Array {
                 size: *count,

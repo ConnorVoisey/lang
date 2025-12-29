@@ -4,6 +4,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TypeCheckingError {
+    #[error("The array's inner type cannot be infered from usage")]
+    ArrayNoInnerType { creation_span: Span },
+
     #[error(
         "Tried calling a function with invalid args, expected {fn_arg_def_str} got {call_type_str}"
     )]
@@ -124,7 +127,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "These types are not compatible. Consider casting into the expected type.",
                 )]),
-
             TypeCheckingError::MissingFnArgCall {
                 calling_span,
                 fn_def_span,
@@ -140,7 +142,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "Try adding the missing arguments or removing the parameter.",
                 )]),
-
             TypeCheckingError::Mismatch {
                 type_a_span,
                 type_b_span,
@@ -156,7 +157,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "These two types are incompatible. Try casting one of them into the other.",
                 )]),
-
             TypeCheckingError::AssignmentMismatch {
                 assigned_type_span,
                 var_decl_span,
@@ -172,7 +172,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "The type of the value being assigned doesn't match the variable's type.",
                 )]),
-
             TypeCheckingError::WhileConditionNotBool { condition_span, .. } => Diagnostic::error()
                 .with_message(self.to_string())
                 .with_labels(vec![
@@ -182,7 +181,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "While loop conditions must evaluate to a boolean value.",
                 )]),
-
             TypeCheckingError::IfConditionNotBool { condition_span, .. } => Diagnostic::error()
                 .with_message(self.to_string())
                 .with_labels(vec![
@@ -192,7 +190,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "If conditions must evaluate to a boolean value.",
                 )]),
-
             TypeCheckingError::CallNonFunction { call_span, .. } => Diagnostic::error()
                 .with_message(self.to_string())
                 .with_labels(vec![
@@ -202,7 +199,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "Only functions can be called with () syntax.",
                 )]),
-
             TypeCheckingError::IfElseBranchMismatch {
                 if_span, else_span, ..
             } => Diagnostic::error()
@@ -216,7 +212,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "All branches of an if expression must return the same type.",
                 )]),
-
             TypeCheckingError::ComparisonTypeMismatch {
                 left_span,
                 right_span,
@@ -232,7 +227,6 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "Comparison operators (<, >, <=, >=) require integer operands.",
                 )]),
-
             TypeCheckingError::BreakOutsideLoop { break_span } => Diagnostic::error()
                 .with_message(self.to_string())
                 .with_labels(vec![
@@ -241,6 +235,15 @@ impl ToDiagnostic for TypeCheckingError {
                 ])
                 .with_notes(vec![String::from(
                     "Break statements can only be used inside while loops.",
+                )]),
+            TypeCheckingError::ArrayNoInnerType { creation_span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, creation_span.start..creation_span.end)
+                        .with_message("array instantiated here"),
+                ])
+                .with_notes(vec![String::from(
+                    "Adding an element to this array will give it a type",
                 )]),
         }
     }

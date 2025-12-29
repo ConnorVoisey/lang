@@ -28,17 +28,22 @@ fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
         TypeKind::I32 => Some(types::I64),
         TypeKind::U64 => Some(types::I64),
         TypeKind::Bool => Some(types::I8),
-        TypeKind::Str => todo!(),
-        TypeKind::CStr => todo!(),
-        TypeKind::Void => todo!(),
-        TypeKind::Struct(_) => todo!(),
-        TypeKind::Fn { .. } => todo!(),
-        TypeKind::Ref(_) => Some(types::I64),
-        TypeKind::Unknown => todo!(),
-        TypeKind::Var => todo!(),
-        TypeKind::Array { .. } => todo!(),
-        TypeKind::State => None,
+        TypeKind::CStr => Some(types::I64),
+        TypeKind::Array { .. } => todo!("This should probably be a pointer"),
         TypeKind::Enum(_) => todo!(),
+        TypeKind::Ref(_) => Some(types::I64),
+        TypeKind::Str => unreachable!(
+            "Str should be lowered into the respected fields that are accessed before going to cranelift."
+        ),
+        TypeKind::Struct(_) => unreachable!(
+            "struct should be lowered into the respected fields that are accessed before going to cranelift."
+        ),
+        TypeKind::Void => unreachable!(),
+        TypeKind::Fn { .. } => unreachable!(),
+        TypeKind::Unknown => unreachable!(),
+        TypeKind::Become => unreachable!(),
+        TypeKind::Var => unreachable!(),
+        TypeKind::State => None,
     }
 }
 
