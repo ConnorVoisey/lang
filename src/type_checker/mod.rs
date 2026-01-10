@@ -530,9 +530,7 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = if_block_return_id;
                         if_block_return_id
                     }
-                    Op::Equivalent { left, right } => {
-                        // TODO: this block and the op less than block are duplicated with
-                        // different types, abstract these to reduce the boiler plate
+                    Op::Equivalent { left, right } | Op::NotEquivalent { left, right } => {
                         let left_type_id = self
                             .check_expr(left, return_type_id, fn_symbol_id, inside_loop)
                             .expect("left hand side of comparison expression did not have a type");
@@ -546,6 +544,27 @@ impl<'a> TypeChecker<'a> {
                                 left_span: left.span.clone(),
                                 right_type_str: self.arena.id_to_string(right_type_id),
                                 right_span: right.span.clone(),
+                            });
+                        }
+                        Some(self.arena.bool_type)
+                    }
+                    Op::BinInverse(cond) => {
+                        let left_type_id = self
+                            .check_expr(cond, return_type_id, fn_symbol_id, inside_loop)
+                            .expect("condition of `!` expression did not have a type");
+
+                        if self
+                            .arena
+                            .unify(left_type_id, self.arena.bool_type)
+                            .is_err()
+                        {
+                            // TODO: this probably needs to be a separate case, or the right hand
+                            // side needs to be made optional
+                            self.errors.push(TypeCheckingError::ComparisonTypeMismatch {
+                                left_type_str: self.arena.id_to_string(left_type_id),
+                                left_span: cond.span.clone(),
+                                right_type_str: self.arena.id_to_string(self.arena.bool_type),
+                                right_span: cond.span.clone(),
                             });
                         }
                         Some(self.arena.bool_type)

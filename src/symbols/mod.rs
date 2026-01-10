@@ -357,14 +357,12 @@ impl SymbolTable {
                 | Op::Dot { left, right }
                 | Op::DoubleColon { left, right }
                 | Op::Equivalent { left, right }
+                | Op::NotEquivalent { left, right }
                 | Op::BracketOpen { left, right } => {
                     self.register_expr(left);
                     self.register_expr(right);
                 }
-                Op::Neg(ast_expr) => {
-                    self.register_expr(ast_expr);
-                }
-                Op::Ref(ast_expr) => {
+                Op::BinInverse(ast_expr) | Op::Neg(ast_expr) | Op::Ref(ast_expr) => {
                     self.register_expr(ast_expr);
                 }
                 Op::FnCall { ident, args } => {

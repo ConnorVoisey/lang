@@ -415,6 +415,19 @@ impl<'a> AstLowering<'a> {
                 Some(builder.binary(BinaryOp::Eq, lhs, rhs, self.types.bool_type, span))
             }
 
+            Op::NotEquivalent { left, right } => {
+                let lhs = self.lower_expr(builder, left)?;
+                let rhs = self.lower_expr(builder, right)?;
+                // Comparison operations always return bool
+                Some(builder.binary(BinaryOp::Ne, lhs, rhs, self.types.bool_type, span))
+            }
+
+            Op::BinInverse(inner_expr) => {
+                dbg!(inner_expr);
+                let operand = self.lower_expr(builder, inner_expr)?;
+                Some(builder.unary(UnaryOp::Not, operand, self.types.bool_type, span))
+            }
+
             Op::Neg(operand) => {
                 let val = self.lower_expr(builder, operand)?;
                 Some(builder.unary(UnaryOp::Neg, val, ty, span))

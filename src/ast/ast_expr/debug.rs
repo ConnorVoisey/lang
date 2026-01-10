@@ -1,5 +1,3 @@
-use parking_lot::RwLock;
-
 use crate::{
     ast::{
         Ast,
@@ -10,6 +8,7 @@ use crate::{
     lexer::{Lexer, TokenKind},
     symbols::SymbolTable,
 };
+use parking_lot::RwLock;
 
 impl Ast {
     pub fn expr_to_debug(&self, expr: &AstExpr) -> DebugExprKind {
@@ -87,6 +86,11 @@ impl Ast {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
                 },
+                Op::NotEquivalent { left, right } => DebugOp::NotEquivalent {
+                    left: self.expr_to_debug(left),
+                    right: self.expr_to_debug(right),
+                },
+                Op::BinInverse(expr) => DebugOp::BinInverse(self.expr_to_debug(expr)),
                 Op::ArrayAccess { left, right } => DebugOp::ArrayAccess {
                     left: self.expr_to_debug(left),
                     right: self.expr_to_debug(right),
@@ -269,6 +273,11 @@ pub enum DebugOp {
         left: DebugExprKind,
         right: DebugExprKind,
     },
+    NotEquivalent {
+        left: DebugExprKind,
+        right: DebugExprKind,
+    },
+    BinInverse(DebugExprKind),
     ArrayAccess {
         left: DebugExprKind,
         right: DebugExprKind,

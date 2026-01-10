@@ -81,6 +81,11 @@ pub enum Op {
         left: AstExpr,
         right: AstExpr,
     },
+    NotEquivalent {
+        left: AstExpr,
+        right: AstExpr,
+    },
+    BinInverse(AstExpr),
     ArrayInit {
         args: Vec<AstExpr>,
     },
@@ -119,6 +124,7 @@ impl Ast {
         is_direct_if_cond: bool,
     ) -> Option<AstExpr> {
         let start_token_at = self.curr_token_i();
+        dbg!(&self);
 
         // make sure we have a token
         let cur_token = match self.curr_token() {
@@ -190,6 +196,38 @@ impl Ast {
                         end: self.tokens[self.curr_token_i()].span.end,
                     },
                     kind: ExprKind::Op(Box::new(Op::Neg(rhs))),
+                    type_id: None,
+                })
+            }
+
+            TokenKind::BinInverse => {
+                let ((), r_bp) = prefix_binding_power(&TokenKind::BinInverse);
+                self.next_token();
+                let rhs = match self.parse_expr(r_bp, symbols, is_direct_if_cond) {
+                    Some(e) => e,
+                    None => {
+                        // token for message: use current token if available, otherwise a dummy
+                        let tok = self.curr_token().cloned().unwrap_or(Token {
+                            kind: TokenKind::BinInverse,
+                            span: Span {
+                                start: self.tokens[start_token_at].span.start,
+                                end: self.tokens[start_token_at].span.end,
+                            },
+                        });
+                        self.errs
+                            .push(AstParseError::PrefixExprMissingRhs { token: tok });
+                        return None;
+                    }
+                };
+                dbg!(&rhs);
+                // keep prior behavior
+                self.next_token_i -= 1;
+                Some(AstExpr {
+                    span: Span {
+                        start: self.tokens[start_token_at].span.start,
+                        end: self.tokens[self.curr_token_i()].span.end,
+                    },
+                    kind: ExprKind::Op(Box::new(Op::BinInverse(rhs))),
                     type_id: None,
                 })
             }
@@ -285,6 +323,7 @@ impl Ast {
                 return None;
             }
         };
+        dbg!(&lhs);
 
         self.next_token();
 
@@ -415,6 +454,14 @@ impl Ast {
                             type_id: None,
                         }),
                     },
+                    TokenKind::NotEquivalent => Op::NotEquivalent {
+                        left: lhs?,
+                        right: rhs.unwrap_or(AstExpr {
+                            span: Span { start: 0, end: 0 },
+                            kind: ExprKind::Atom(Atom::Int(0)),
+                            type_id: None,
+                        }),
+                    },
                     TokenKind::LessThan => Op::LessThan {
                         left: lhs?,
                         right: rhs.unwrap_or(AstExpr {
@@ -490,6 +537,7 @@ impl Ast {
 fn prefix_binding_power(op_token: &TokenKind) -> ((), u8) {
     match op_token {
         TokenKind::Subtract | TokenKind::Amp => ((), 11),
+        TokenKind::BinInverse => ((), 12),
         _ => panic!("bad op: {:?}", op_token),
     }
 }
@@ -506,7 +554,7 @@ fn postfix_binding_power(op_token: &TokenKind) -> Option<(u8, ())> {
 
 fn infix_binding_power(op_token: &TokenKind) -> Option<(u8, u8)> {
     match op_token {
-        TokenKind::Equivalent => Some((1, 2)),
+        TokenKind::Equivalent | TokenKind::NotEquivalent => Some((1, 2)),
         // Comparison operators - all at the same precedence level
         TokenKind::LessThan
         | TokenKind::LessThanEq
@@ -608,6 +656,14 @@ mod test {
         let debug_expr = parse_debug("-42;");
         let expected = DebugExprKind::Op(Box::new(DebugOp::Neg(DebugExprKind::Atom(
             DebugAtom::Int(42),
+        ))));
+        assert_eq!(debug_expr, expected);
+    }
+    #[test]
+    fn unary_not() {
+        let debug_expr = parse_debug("!false");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::BinInverse(DebugExprKind::Atom(
+            DebugAtom::Bool(false),
         ))));
         assert_eq!(debug_expr, expected);
     }
@@ -1280,6 +1336,28 @@ mod test {
                 left: DebugExprKind::Atom(DebugAtom::Ident("y".to_string())),
                 right: DebugExprKind::Atom(DebugAtom::Int(3)),
             })),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    // ===== Equivalence and not equivalence=====
+
+    #[test]
+    fn equivalence() {
+        let debug_expr = parse_debug("2 == 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::Equivalent {
+            left: DebugExprKind::Atom(DebugAtom::Int(2)),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
+        }));
+        assert_eq!(debug_expr, expected);
+    }
+
+    #[test]
+    fn not_equivalence() {
+        let debug_expr = parse_debug("2 != 3;");
+        let expected = DebugExprKind::Op(Box::new(DebugOp::NotEquivalent {
+            left: DebugExprKind::Atom(DebugAtom::Int(2)),
+            right: DebugExprKind::Atom(DebugAtom::Int(3)),
         }));
         assert_eq!(debug_expr, expected);
     }

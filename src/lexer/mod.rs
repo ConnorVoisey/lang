@@ -38,6 +38,8 @@ pub enum TokenKind {
     Subtract,
     Assign,
     Equivalent,
+    NotEquivalent,
+    BinInverse,
     Comma,
     Dot,
     Amp,
@@ -169,6 +171,20 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
                     _ => TokenKind::Assign,
+                },
+                '!' => match chars.peek() {
+                    Some(&(_, '=')) => {
+                        chars.next();
+                        lexer.tokens.push(Token {
+                            span: Span {
+                                start: i,
+                                end: i + 1,
+                            },
+                            kind: TokenKind::NotEquivalent,
+                        });
+                        continue;
+                    }
+                    _ => TokenKind::BinInverse,
                 },
                 ',' => TokenKind::Comma,
                 '.' => TokenKind::Dot,
@@ -310,12 +326,12 @@ impl<'src> Lexer<'src> {
         chars: &mut Peekable<CharIndices>,
         interner: &SharedInterner,
     ) {
-        let mut end_i = start_i;
-        while let Some((i, char)) = chars.peek() {
+        let mut end_i = start_i + 1;
+        while let Some((_, char)) = chars.peek() {
             if !char.is_alphanumeric() && *char != '_' {
-                end_i = *i;
                 break;
             }
+            end_i += 1;
             chars.next();
         }
 
@@ -403,9 +419,13 @@ mod test {
 
     #[test]
     fn basic_lexing() {
-        let src =
-            "fn test(ident Int, ident_underscore C_Char, c_char Str) Int {let foo = c\"test\\n\"}"
-                .to_string();
+        let src = r#"
+            fn test(ident Int, ident_underscore C_Char, c_char Str) Int {
+                let foo = c"test";
+                let bar = false != true;
+            }"
+            "#
+        .to_string();
         let interner = Interner::new();
         let shared_interner = SharedInterner::new(RwLock::new(interner));
         let tokens = Lexer::from_src_str(&src, &shared_interner).unwrap().tokens;
@@ -433,9 +453,33 @@ mod test {
                 TokenKind::LetKeyWord,
                 TokenKind::Ident(i.lookup_ident("foo")),
                 TokenKind::Assign,
-                TokenKind::CStr(String::from("test\n")),
+                TokenKind::CStr(String::from("test")),
+                TokenKind::SemiColon,
+                TokenKind::LetKeyWord,
+                TokenKind::Ident(i.lookup_ident("bar")),
+                TokenKind::Assign,
+                TokenKind::FalseKeyWord,
+                TokenKind::NotEquivalent,
+                TokenKind::TrueKeyWord,
+                TokenKind::SemiColon,
                 TokenKind::CurlyBracketClose,
             ]
+        );
+    }
+
+    #[test]
+    fn keyword_no_space() {
+        let src = r#"false"#.to_string();
+        let interner = Interner::new();
+        let shared_interner = SharedInterner::new(RwLock::new(interner));
+        let tokens = Lexer::from_src_str(&src, &shared_interner).unwrap().tokens;
+        let mut i = shared_interner.write();
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.kind.clone())
+                .collect::<Vec<_>>(),
+            vec![TokenKind::FalseKeyWord,]
         );
     }
 }
