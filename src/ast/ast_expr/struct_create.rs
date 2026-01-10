@@ -26,6 +26,7 @@ impl Ast {
             self.tokens.get(self.curr_token_i() - 1),
         );
         let mut args = vec![];
+        let mut expr_count = 1;
 
         // Parse fields if not empty
         if !matches!(
@@ -48,6 +49,7 @@ impl Ast {
                     }) => {
                         self.next_token();
                         let expr = self.parse_expr(0, symbols, false)?;
+                        expr_count += expr.expr_count;
                         args.push((ident_cloned, expr));
                         // After parse_expr, cursor is at comma or '}'
                         if let Some(Token {
@@ -84,6 +86,7 @@ impl Ast {
                 start: self.tokens[start_token_at].span.start,
                 end: self.tokens[self.curr_token_i()].span.end,
             },
+            expr_count,
             kind: ExprKind::Op(Box::new(Op::StructCreate {
                 ident: lhs,
                 symbol_id: None,

@@ -28,6 +28,7 @@ impl Ast {
         );
 
         let mut args = vec![];
+        let mut expr_count = 1;
 
         // empty arg list: immediate ')'
         if let Some(Token {
@@ -41,6 +42,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count,
                 kind: ExprKind::Op(Box::new(Op::FnCall { ident: lhs, args })),
                 type_id: None,
             });
@@ -48,6 +50,7 @@ impl Ast {
 
         loop {
             if let Some(arg) = self.parse_expr(0, symbols, false) {
+                expr_count += arg.expr_count;
                 args.push(arg);
             } else {
                 // parse_expr pushed an error; attempt to continue
@@ -94,6 +97,7 @@ impl Ast {
                 start: self.tokens[start_token_at].span.start,
                 end: self.tokens[self.curr_token_i()].span.end,
             },
+            expr_count,
             kind: ExprKind::Op(Box::new(Op::FnCall { ident: lhs, args })),
             type_id: None,
         })

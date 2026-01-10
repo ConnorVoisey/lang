@@ -12,6 +12,7 @@ pub struct AstBlock {
     pub block_close_token_at: usize,
     pub statements: Vec<AstStatement>,
     pub type_id: Option<TypeId>,
+    pub expr_count: u32,
 }
 #[derive(Debug)]
 pub enum StatementKind {
@@ -45,6 +46,7 @@ pub enum StatementKind {
 pub struct AstStatement {
     pub start_token_at: usize,
     pub kind: StatementKind,
+    pub expr_count: u32,
 }
 
 impl Ast {
@@ -66,6 +68,7 @@ impl Ast {
         );
         let block_open_token_at = self.curr_token_i();
         let mut statements = vec![];
+        let mut expr_count = 1;
         while let Some(tok) = self.next_token() {
             match &tok.kind {
                 TokenKind::CurlyBracketClose => {
@@ -73,6 +76,7 @@ impl Ast {
                 }
                 _ => {
                     if let Some(statement) = self.parse_statement(symbols, is_fn_return) {
+                        expr_count += statement.expr_count;
                         let need_break =
                             matches!(&statement.kind, StatementKind::BlockReturn { .. });
                         statements.push(statement);
@@ -89,6 +93,7 @@ impl Ast {
             block_close_token_at: self.curr_token_i(),
             statements,
             type_id: None,
+            expr_count,
         })
     }
 
@@ -137,13 +142,15 @@ impl Ast {
                     "Attempted to define a variable but missed the `=` after the ident"
                 );
                 self.next_token();
+                let expr = self.parse_expr(0, symbols, false)?;
                 Some(AstStatement {
                     start_token_at: start_token_i,
+                    expr_count: expr.expr_count,
                     kind: StatementKind::Decleration {
                         ident_id,
                         symbol_id,
                         ident_token_at: start_token_i + 1,
-                        expr: self.parse_expr(0, symbols, false)?,
+                        expr,
                     },
                 })
             }
@@ -152,9 +159,11 @@ impl Ast {
                 ..
             }) => {
                 self.next_token();
+                let expr = self.parse_expr(0, symbols, false)?;
                 Some(AstStatement {
                     start_token_at: start_token_i,
-                    kind: StatementKind::ExplicitReturn(self.parse_expr(0, symbols, false)?),
+                    expr_count: expr.expr_count,
+                    kind: StatementKind::ExplicitReturn(expr),
                 })
             }
             Some(Token {
@@ -167,6 +176,7 @@ impl Ast {
                     kind: StatementKind::Break {
                         span: self.curr_token().unwrap().span.clone(),
                     },
+                    expr_count: 1,
                 })
             }
             Some(Token {
@@ -182,12 +192,14 @@ impl Ast {
                     }) => {
                         self.next_token();
                         self.next_token();
+                        let expr = self.parse_expr(0, symbols, false)?;
                         Some(AstStatement {
                             start_token_at,
+                            expr_count: expr.expr_count,
                             kind: StatementKind::Assignment {
                                 ident_id,
                                 ident_token_at: start_token_at + 1,
-                                expr: self.parse_expr(0, symbols, false)?,
+                                expr,
                                 symbol_id: symbols.lookup(ident_id),
                             },
                         })
@@ -196,6 +208,7 @@ impl Ast {
                         let expr = self.parse_expr(0, symbols, false)?;
                         Some(AstStatement {
                             start_token_at,
+                            expr_count: expr.expr_count,
                             kind: match self.curr_token() {
                                 Some(Token {
                                     kind: TokenKind::CurlyBracketClose,
@@ -217,6 +230,7 @@ impl Ast {
                 let block = self.parse_block(symbols, false)?;
                 Some(AstStatement {
                     start_token_at,
+                    expr_count: condition.expr_count + block.expr_count,
                     kind: StatementKind::WhileLoop { condition, block },
                 })
             }
@@ -225,6 +239,7 @@ impl Ast {
                 let expr = self.parse_expr(0, symbols, false)?;
                 Some(AstStatement {
                     start_token_at,
+                    expr_count: expr.expr_count + 1,
                     kind: match self.curr_token() {
                         Some(Token {
                             kind: TokenKind::CurlyBracketClose,

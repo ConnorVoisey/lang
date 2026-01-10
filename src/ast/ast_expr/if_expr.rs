@@ -118,11 +118,22 @@ impl Ast {
             }
         }
 
+        let mut else_ifs_expr_count = 0;
+        for (else_if_expr, else_if_block) in &else_ifs {
+            else_ifs_expr_count += else_if_expr.expr_count + else_if_block.expr_count + 1;
+        }
         Some(AstExpr {
             span: Span {
                 start: self.tokens[start_token_at].span.start,
                 end: self.tokens[self.curr_token_i()].span.end,
             },
+            expr_count: condition.expr_count
+                + block.expr_count
+                + else_ifs_expr_count
+                + match &unconditional_else {
+                    Some(e) => e.expr_count,
+                    None => 0,
+                },
             kind: ExprKind::Op(Box::new(Op::IfCond {
                 condition,
                 block,

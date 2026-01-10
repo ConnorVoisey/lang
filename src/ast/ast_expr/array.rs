@@ -23,6 +23,7 @@ impl Ast {
         );
         let start_i = self.curr_token().unwrap().span.start;
         self.next_token();
+        let mut expr_count = 1;
 
         let args = if let Some(Token {
             kind: TokenKind::SquareBracketClose,
@@ -34,6 +35,7 @@ impl Ast {
             let mut args = Vec::new();
             loop {
                 if let Some(arg) = self.parse_expr(0, symbols, false) {
+                    expr_count += arg.expr_count;
                     args.push(arg);
                 } else {
                     // parse_expr pushed an error; attempt to continue
@@ -71,6 +73,7 @@ impl Ast {
                 end: self.curr_token().unwrap().span.end,
             },
             type_id: None,
+            expr_count,
             kind: ExprKind::Op(Box::new(Op::ArrayInit { args })),
         })
     }
@@ -108,6 +111,7 @@ impl Ast {
                 start: self.tokens[start_token_at].span.start,
                 end: self.tokens[self.curr_token_i()].span.end,
             },
+            expr_count: lhs.expr_count + 1 + right.expr_count,
             kind: ExprKind::Op(Box::new(Op::ArrayAccess { left: lhs, right })),
             type_id: None,
         })

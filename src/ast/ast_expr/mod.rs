@@ -18,6 +18,7 @@ pub struct AstExpr {
     pub span: Span,
     pub kind: ExprKind,
     pub type_id: Option<TypeId>,
+    pub expr_count: u32,
 }
 #[derive(Debug)]
 pub enum Atom {
@@ -143,6 +144,7 @@ impl Ast {
                         start: start_token_at,
                         end: self.curr_token_i(),
                     },
+                    expr_count: block.expr_count,
                     kind: ExprKind::Op(Box::new(Op::Block(block))),
                     type_id: None,
                 })
@@ -195,6 +197,7 @@ impl Ast {
                         start: self.tokens[start_token_at].span.start,
                         end: self.tokens[self.curr_token_i()].span.end,
                     },
+                    expr_count: rhs.expr_count + 1,
                     kind: ExprKind::Op(Box::new(Op::Neg(rhs))),
                     type_id: None,
                 })
@@ -219,7 +222,6 @@ impl Ast {
                         return None;
                     }
                 };
-                dbg!(&rhs);
                 // keep prior behavior
                 self.next_token_i -= 1;
                 Some(AstExpr {
@@ -227,6 +229,7 @@ impl Ast {
                         start: self.tokens[start_token_at].span.start,
                         end: self.tokens[self.curr_token_i()].span.end,
                     },
+                    expr_count: rhs.expr_count + 1,
                     kind: ExprKind::Op(Box::new(Op::BinInverse(rhs))),
                     type_id: None,
                 })
@@ -237,6 +240,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::Int(*val)),
                 type_id: None,
             }),
@@ -246,6 +250,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::Bool(false)),
                 type_id: None,
             }),
@@ -255,6 +260,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::Bool(true)),
                 type_id: None,
             }),
@@ -264,6 +270,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::CStr(self.curr_token_i())),
                 type_id: None,
             }),
@@ -273,6 +280,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::Str(self.curr_token_i())),
                 type_id: None,
             }),
@@ -282,6 +290,7 @@ impl Ast {
                     start: self.tokens[start_token_at].span.start,
                     end: self.tokens[self.curr_token_i()].span.end,
                 },
+                expr_count: 1,
                 kind: ExprKind::Atom(Atom::Ident((*ident_id, None))),
                 type_id: None,
             }),
@@ -304,6 +313,7 @@ impl Ast {
                         start: self.tokens[start_token_at].span.start,
                         end: self.tokens[self.curr_token_i()].span.end,
                     },
+                    expr_count: rhs.expr_count + 1,
                     kind: ExprKind::Op(Box::new(Op::Ref(rhs))),
                     type_id: None,
                 })
@@ -323,7 +333,6 @@ impl Ast {
                 return None;
             }
         };
-        dbg!(&lhs);
 
         self.next_token();
 
@@ -397,102 +406,66 @@ impl Ast {
                     // parse_expr pushed an error already — try to continue
                     // preserve lhs as-is or mark an error
                 }
+
+                // TODO: maybe there should be a default for most primatives so that it can
+                // continue to propegate errors including type checking errors
+                let default_expr = AstExpr {
+                    span: Span { start: 0, end: 0 },
+                    kind: ExprKind::Atom(Atom::Int(0)),
+                    expr_count: 1,
+                    type_id: None,
+                };
+                let lhs_expr_count = lhs.as_ref().map(|expr| expr.expr_count)?;
+                let rhs_expr_count = rhs.as_ref().map(|expr| expr.expr_count)?;
+
                 let kind = match &op_token_kind {
                     TokenKind::Add => Op::Add {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::Subtract => Op::Minus {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::Slash => Op::Divide {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::Astrix => Op::Multiply {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::Dot => Op::Dot {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::DoubleColon => Op::DoubleColon {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::Equivalent => Op::Equivalent {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::NotEquivalent => Op::NotEquivalent {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::LessThan => Op::LessThan {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::LessThanEq => Op::LessThanEq {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::GreaterThan => Op::GreaterThan {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     TokenKind::GreaterThanEq => Op::GreaterThanEq {
                         left: lhs?,
-                        right: rhs.unwrap_or(AstExpr {
-                            span: Span { start: 0, end: 0 },
-                            kind: ExprKind::Atom(Atom::Int(0)),
-                            type_id: None,
-                        }),
+                        right: rhs.unwrap_or(default_expr),
                     },
                     _ => {
                         // unknown operator - record error
@@ -508,6 +481,7 @@ impl Ast {
                         start: self.tokens[start_token_at].span.start,
                         end: self.tokens[self.curr_token_i()].span.end,
                     },
+                    expr_count: lhs_expr_count + 1 + rhs_expr_count,
                     kind: ExprKind::Op(Box::new(kind)),
                     type_id: None,
                 });
