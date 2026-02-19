@@ -24,7 +24,7 @@ pub struct AstExpr {
 pub enum Atom {
     Ident((IdentId, Option<SymbolId>)),
     Bool(bool),
-    Int(i32),
+    Int(i128),
     Str(usize),
     CStr(usize),
 }
@@ -125,7 +125,6 @@ impl Ast {
         is_direct_if_cond: bool,
     ) -> Option<AstExpr> {
         let start_token_at = self.curr_token_i();
-        dbg!(&self);
 
         // make sure we have a token
         let cur_token = match self.curr_token() {
@@ -418,55 +417,21 @@ impl Ast {
                 let lhs_expr_count = lhs.as_ref().map(|expr| expr.expr_count)?;
                 let rhs_expr_count = rhs.as_ref().map(|expr| expr.expr_count)?;
 
+                let left = lhs?;
+                let right = rhs.unwrap_or(default_expr);
                 let kind = match &op_token_kind {
-                    TokenKind::Add => Op::Add {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::Subtract => Op::Minus {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::Slash => Op::Divide {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::Astrix => Op::Multiply {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::Dot => Op::Dot {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::DoubleColon => Op::DoubleColon {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::Equivalent => Op::Equivalent {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::NotEquivalent => Op::NotEquivalent {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::LessThan => Op::LessThan {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::LessThanEq => Op::LessThanEq {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::GreaterThan => Op::GreaterThan {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
-                    TokenKind::GreaterThanEq => Op::GreaterThanEq {
-                        left: lhs?,
-                        right: rhs.unwrap_or(default_expr),
-                    },
+                    TokenKind::Add => Op::Add { left, right },
+                    TokenKind::Subtract => Op::Minus { left, right },
+                    TokenKind::Slash => Op::Divide { left, right },
+                    TokenKind::Astrix => Op::Multiply { left, right },
+                    TokenKind::Dot => Op::Dot { left, right },
+                    TokenKind::DoubleColon => Op::DoubleColon { left, right },
+                    TokenKind::Equivalent => Op::Equivalent { left, right },
+                    TokenKind::NotEquivalent => Op::NotEquivalent { left, right },
+                    TokenKind::LessThan => Op::LessThan { left, right },
+                    TokenKind::LessThanEq => Op::LessThanEq { left, right },
+                    TokenKind::GreaterThan => Op::GreaterThan { left, right },
+                    TokenKind::GreaterThanEq => Op::GreaterThanEq { left, right },
                     _ => {
                         // unknown operator - record error
                         if let Some(tok) = self.curr_token().cloned() {

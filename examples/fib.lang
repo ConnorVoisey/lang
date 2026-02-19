@@ -2,10 +2,10 @@ import {
 }
 
 extern "C" {
-    fn printf(str &CStr, val Int) Int;
+    fn printf(str &CStr, val I32) I32;
 }
 
-fn fib(n Int) Int {
+fn fib(n I32) I32 {
     if n < 2 {
         n
     } else {
@@ -13,7 +13,7 @@ fn fib(n Int) Int {
     }
 }
 
-fn main() Int {
+fn main() I32 {
     printf(&c"%d\n", fib(43));
     0
 }

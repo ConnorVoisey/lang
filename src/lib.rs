@@ -90,7 +90,7 @@ impl ModParser {
             return Err(CompliationError::AstParseError(ast.errs));
         }
 
-        // dbg!(&ast);
+        dbg!(&ast.extern_fns);
         let mut type_arena = TypeArena::new();
         symbols.register_ast(&mut ast, &mut type_arena);
 

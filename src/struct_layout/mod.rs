@@ -119,17 +119,18 @@ impl<'a> StructLayoutInfo<'a> {
 
         let type_kind = self.types.kind(type_id);
         match type_kind {
-            TypeKind::I32 => (4, 4),
+            TypeKind::IntLiteral(_) | TypeKind::I32 | TypeKind::U32 => (4, 4),
+            TypeKind::U8 => (1, 1),
             TypeKind::U64 => (8, 8),
-            TypeKind::Bool => (1, 1),   // i8/bool
-            TypeKind::Void => (0, 1),   // void has no size
-            TypeKind::CStr => (8, 8),   // pointer to C string
-            TypeKind::Str => (16, 8),   // fat pointer (ptr + len)
-            TypeKind::Ref(_) => (8, 8), // reference/pointer
+            TypeKind::Bool => (1, 1),
+            TypeKind::Void => (0, 1),
+            TypeKind::CStr => (8, 8),
+            TypeKind::Str => (16, 8),
+            TypeKind::Ref(_) => (8, 8),
             TypeKind::Struct(struct_id) => {
                 let layout = self
                     .get(*struct_id)
-                    .expect("Struct layout must be computed before use, should have been covered in topological sort");
+                    .expect("Struct layout must be computed bef=> unreachable!(), use, should have been covered in topological sort");
                 (layout.size, layout.alignment)
             }
             TypeKind::Enum(_enum_id) => {
@@ -139,7 +140,7 @@ impl<'a> StructLayoutInfo<'a> {
                 //     .expect("Enum layout must be computed before use, should have been covered in topological sort");
                 // (layout.size, layout.alignment)
             }
-            TypeKind::Fn { .. } => (8, 8), // function pointer
+            TypeKind::Fn { .. } => (8, 8),
             TypeKind::Unknown => {
                 panic!("Cannot compute size of Become - should be resolved by type checker")
             }

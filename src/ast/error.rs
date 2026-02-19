@@ -1,4 +1,7 @@
-use crate::{error::ToDiagnostic, lexer::Token};
+use crate::{
+    error::ToDiagnostic,
+    lexer::{Span, Token},
+};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use thiserror::Error;
 
@@ -83,6 +86,9 @@ pub enum AstParseError {
 
     #[error("Expected operator here")]
     ExpectedOperator { token: Token },
+
+    #[error("Not a valid assignment target")]
+    InvalidAssignmentTarget { span: Span },
 }
 
 impl ToDiagnostic for AstParseError {
@@ -332,6 +338,16 @@ impl ToDiagnostic for AstParseError {
             AstParseError::UnexpectedEndOfInput => {
                 Diagnostic::error().with_message("Unexpected end of input")
             }
+
+            AstParseError::InvalidAssignmentTarget { span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, span.start..span.end)
+                        .with_message("cannot assign to this expression"),
+                ])
+                .with_notes(vec![String::from(
+                    "Only variables, array elements, and struct fields can be assigned to.",
+                )]),
         }
     }
 }

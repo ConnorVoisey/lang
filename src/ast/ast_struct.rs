@@ -163,7 +163,7 @@ mod test {
     fn basic_struct() {
         let src = String::from(
             r#"struct CLikeStr {
-    len Uint,
+    len U32,
     chars &CChar
 }"#,
         );
@@ -192,7 +192,7 @@ mod test {
             .map(|f| (i.resolve(f.ident).to_string(), f.var_type.clone()))
             .collect::<Vec<_>>();
         let expected = vec![
-            ("len".to_string(), VarType::Uint),
+            ("len".to_string(), VarType::U32),
             ("chars".to_string(), VarType::Ref(Box::new(VarType::CChar))),
         ];
         assert_eq!(fields_mapped, expected);

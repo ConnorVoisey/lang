@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     ast::{
         Ast,
-        ast_block::{AstBlock, AstStatement, StatementKind},
+        ast_block::{AstBlock, AstStatement, Lvalue, LvalueKind, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
         ast_struct::AstStructField,
@@ -175,6 +175,7 @@ impl<'a> AstLowering<'a> {
             return_type,
             fn_span.clone(),
             self.struct_layout_info,
+            self.types.void_type,
         );
 
         let lambda_region = builder.create_lambda(return_type, fn_span.clone());
@@ -257,21 +258,47 @@ impl<'a> AstLowering<'a> {
                 }
             }
 
-            StatementKind::Assignment {
-                symbol_id, expr, ..
-            } => {
-                if let Some(value) = self.lower_expr(builder, expr) {
-                    if let Some(sym_id) = symbol_id {
-                        builder.define_symbol(*sym_id, value);
-                        // Track that this variable was modified
-                        if !self.modified_vars.contains(sym_id) {
-                            self.modified_vars.push(*sym_id);
+            StatementKind::Assignment { lhs, rhs } => {
+                let rhs_val = self.lower_expr(builder, rhs)?;
+                match &lhs.kind {
+                    LvalueKind::Ident {
+                        symbol_id: Some(sym),
+                        ..
+                    } => {
+                        let sym = *sym;
+                        builder.define_symbol(sym, rhs_val);
+                        if !self.modified_vars.contains(&sym) {
+                            self.modified_vars.push(sym);
                         }
                     }
-                    Some(value)
-                } else {
-                    None
+                    LvalueKind::ArrayAccess { .. } => {
+                        let lhs_span = lhs.span.clone();
+                        if let Some((ptr, elem_type_id)) =
+                            self.lower_lvalue_ptr(builder, lhs, lhs_span.clone())
+                        {
+                            let state = self.current_state.expect("State not initialized");
+                            let store_outputs =
+                                builder.store(state, ptr, rhs_val, elem_type_id, lhs_span);
+                            self.current_state = Some(store_outputs.state);
+                        }
+                        if let Some(sym) = lhs.root_symbol()
+                            && !self.modified_vars.contains(&sym)
+                        {
+                            self.modified_vars.push(sym);
+                        }
+                    }
+                    LvalueKind::FieldAccess { .. } => {
+                        todo!("struct field assignment lowering")
+                    }
+                    LvalueKind::Ident {
+                        symbol_id: None, ..
+                    } => {
+                        unreachable!(
+                            "symbol not resolved within Lvalue; error already reported by type checker"
+                        )
+                    }
                 }
+                Some(rhs_val)
             }
 
             StatementKind::ExplicitReturn(expr) => {
@@ -761,16 +788,15 @@ impl<'a> AstLowering<'a> {
             _ => None,
         }
     }
-
     /// Scan a block to find all variable assignments (for gamma/theta node handling)
     fn scan_block_for_assignments(&self, block: &AstBlock, modified: &mut Vec<SymbolId>) {
         for statement in &block.statements {
             match &statement.kind {
-                StatementKind::Assignment { symbol_id, .. } => {
-                    if let Some(sym) = symbol_id
-                        && !modified.contains(sym)
+                StatementKind::Assignment { lhs, .. } => {
+                    if let Some(sym) = lhs.root_symbol()
+                        && !modified.contains(&sym)
                     {
-                        modified.push(*sym);
+                        modified.push(sym);
                     }
                 }
                 StatementKind::WhileLoop { block, .. } => {
@@ -940,6 +966,65 @@ impl<'a> AstLowering<'a> {
 
         // Return the pointer to the struct
         Some(alloc_outputs.pointer)
+    }
+
+    /// Compute the memory address of a lvalue and return `(ptr, element_type_id)`.
+    ///
+    /// - `Ident`       → `(lookup_symbol(sym), sym_type)` — the array/var pointer itself
+    /// - `ArrayAccess` → base ptr + (index * sizeof(inner_type)), inner_type
+    /// - `FieldAccess` → TODO
+    fn lower_lvalue_ptr(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        lvalue: &Lvalue,
+        span: Span,
+    ) -> Option<(ValueId, TypeId)> {
+        match &lvalue.kind {
+            LvalueKind::Ident {
+                symbol_id: Some(sym),
+                ..
+            } => {
+                let sym_type_id = match &self.symbols.resolve(*sym).kind {
+                    SymbolKind::Var(data) => data.type_id?,
+                    SymbolKind::FnArg(data) => data.type_id?,
+                    _ => return None,
+                };
+                let ptr = builder.lookup_symbol(*sym)?;
+                Some((ptr, sym_type_id))
+            }
+            LvalueKind::Ident {
+                symbol_id: None, ..
+            } => None,
+            LvalueKind::ArrayAccess { base, index } => {
+                let (base_ptr, base_type_id) =
+                    self.lower_lvalue_ptr(builder, base, span.clone())?;
+                // Extract inner_type before borrowing self again
+                let inner_type_id = match self.types.kind(base_type_id) {
+                    TypeKind::Array { inner_type, .. } => *inner_type,
+                    t => unreachable!("expected array type for array access lvalue, got: {:?}", t),
+                };
+                let index_val = self.lower_expr(builder, index)?;
+                let (elem_size, _) = builder
+                    .struct_layout_info
+                    .size_and_align_of_type(inner_type_id);
+                let u64_type = self.types.uint_type;
+                let zeroed_span = Span { start: 0, end: 0 };
+                let elem_size_val =
+                    builder.const_u64(elem_size as u64, u64_type, zeroed_span.clone());
+                let offset = builder.binary(
+                    BinaryOp::Mul,
+                    index_val,
+                    elem_size_val,
+                    u64_type,
+                    span.clone(),
+                );
+                let ptr = builder.binary(BinaryOp::Add, base_ptr, offset, u64_type, zeroed_span);
+                Some((ptr, inner_type_id))
+            }
+            LvalueKind::FieldAccess { .. } => {
+                todo!("struct field lvalue pointer")
+            }
+        }
     }
 
     // TODO: this and lower_array_field_store share a lot of logic,

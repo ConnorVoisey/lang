@@ -15,7 +15,10 @@ pub struct StructId(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
+    IntLiteral(i128),
     I32,
+    U8,
+    U32,
     U64,
     Str,
     CStr,
@@ -178,14 +181,57 @@ impl TypeArena {
 
         match (self.kinds[ra.0].clone(), self.kinds[rb.0].clone()) {
             (TypeKind::Var, _) => {
-                self.union(ra, rb);
-                Ok(())
-            }
-            (_, TypeKind::Var) => {
+                // rb (concrete type) must be root
                 self.union(rb, ra);
                 Ok(())
             }
+            (_, TypeKind::Var) => {
+                // ra (concrete type) must be root
+                self.union(ra, rb);
+                Ok(())
+            }
+            (TypeKind::IntLiteral(_), TypeKind::IntLiteral(_)) => {
+                self.union(ra, rb);
+                Ok(())
+            }
+
+            (TypeKind::IntLiteral(v), other)
+                if matches!(other, TypeKind::U8 | TypeKind::I32 | TypeKind::U64) =>
+            {
+                if self.int_fits(v, &other) {
+                    // rb (concrete type) must be the root so find(int_type) stays concrete
+                    self.union(rb, ra);
+                    Ok(())
+                } else {
+                    Err(UnifyErrorWithoutSpan::Mismatch(
+                        ra,
+                        TypeKind::IntLiteral(v),
+                        rb,
+                        other,
+                    ))
+                }
+            }
+
+            (other, TypeKind::IntLiteral(v))
+                if matches!(other, TypeKind::U8 | TypeKind::I32 | TypeKind::U64) =>
+            {
+                if self.int_fits(v, &other) {
+                    // ra (concrete type) must be the root so find(int_type) stays concrete
+                    self.union(ra, rb);
+                    Ok(())
+                } else {
+                    Err(UnifyErrorWithoutSpan::Mismatch(
+                        ra,
+                        other,
+                        rb,
+                        TypeKind::IntLiteral(v),
+                    ))
+                }
+            }
+
             (TypeKind::I32, TypeKind::I32)
+            | (TypeKind::U8, TypeKind::U8)
+            | (TypeKind::U32, TypeKind::U32)
             | (TypeKind::U64, TypeKind::U64)
             | (TypeKind::Str, TypeKind::Str)
             | (TypeKind::CStr, TypeKind::CStr)
@@ -243,7 +289,7 @@ impl TypeArena {
                     size: size_2,
                 },
             ) => {
-                if inner_type_1 != inner_type_2 || size_1 != size_2 {
+                if size_1 != size_2 {
                     return Err(UnifyErrorWithoutSpan::Mismatch(
                         ra,
                         self.kinds[ra.0].clone(),
@@ -252,7 +298,7 @@ impl TypeArena {
                     ));
                 }
                 self.union(ra, rb);
-                Ok(())
+                self.unify(inner_type_1, inner_type_2)
             }
             (ka, kb) => Err(UnifyErrorWithoutSpan::Mismatch(ra, ka, rb, kb)),
         }
@@ -295,8 +341,11 @@ impl TypeArena {
     pub fn var_type_to_type_kind(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeKind {
         match v {
             VarType::Void => TypeKind::Void,
-            VarType::Int => TypeKind::I32,
-            VarType::Uint => TypeKind::U64,
+            VarType::IntLiteral(val) => TypeKind::IntLiteral(*val),
+            VarType::U64 => TypeKind::U64,
+            VarType::U32 => TypeKind::U32,
+            VarType::U8 => TypeKind::U8,
+            VarType::I32 => TypeKind::I32,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
             VarType::Bool => TypeKind::Bool,
@@ -325,7 +374,6 @@ impl TypeArena {
                 size: *count,
                 inner_type: self.var_type_to_typeid(&var_type, symbols),
             },
-
             VarType::CChar => todo!(),
         }
     }
@@ -335,8 +383,11 @@ impl TypeArena {
     }
     pub fn kind_to_string(&self, kind: &TypeKind) -> String {
         match kind {
-            TypeKind::I32 => "Int".to_string(),
-            TypeKind::U64 => "Uint".to_string(),
+            TypeKind::IntLiteral(_) => "Int".to_string(),
+            TypeKind::I32 => "I32".to_string(),
+            TypeKind::U8 => "U8".to_string(),
+            TypeKind::U32 => "U32".to_string(),
+            TypeKind::U64 => "U64".to_string(),
             TypeKind::Str => "Str".to_string(),
             TypeKind::CStr => "CStr".to_string(),
             TypeKind::Void => "Void".to_string(),
@@ -380,5 +431,14 @@ impl TypeArena {
 
     pub fn set_enum_variants(&mut self, enum_id: EnumId, fields: Vec<(IdentId, TypeId)>) {
         self.enum_variants.insert(enum_id.0, fields);
+    }
+
+    pub fn int_fits(&self, value: i128, target: &TypeKind) -> bool {
+        match target {
+            TypeKind::U8 => value >= 0 && value <= u8::MAX as i128,
+            TypeKind::I32 => value >= i32::MIN as i128 && value <= i32::MAX as i128,
+            TypeKind::U64 => value >= 0 && value <= u64::MAX as i128,
+            _ => false,
+        }
     }
 }

@@ -18,8 +18,11 @@ pub mod error;
 pub enum VarType {
     Void,
     Bool,
-    Int,
-    Uint,
+    IntLiteral(i128),
+    U8,
+    U32,
+    U64,
+    I32,
     Str,
     CStr,
     CChar,
@@ -224,8 +227,9 @@ impl Ast {
                 let ident_cloned_2 = ident_cloned.clone();
                 let span_cloned = span.clone();
                 let var_type = match self.interner.read().resolve(ident_cloned) {
-                    "Int" => VarType::Int,
-                    "Uint" => VarType::Uint,
+                    "U8" => VarType::U8,
+                    "U32" => VarType::U32,
+                    "I32" => VarType::I32,
                     "Str" => VarType::Str,
                     "CStr" => VarType::CStr,
                     "CChar" => VarType::CChar,

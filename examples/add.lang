@@ -1,7 +1,7 @@
 import {
 }
 
-fn main() Int {
+fn main() I32 {
     let foo = 5;
     let bar = 2 + foo;
     0

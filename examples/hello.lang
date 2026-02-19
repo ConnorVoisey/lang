@@ -2,30 +2,28 @@ import {
 }
 
 extern "C" {
-    fn puts(str &CStr) Int;
-    fn printf(fmt &CStr, param Int, param2 Int) Int;
+    fn puts(str &CStr) I32;
+    fn printf(fmt &CStr, param I32) I32;
 }
 
-enum Res {
-    Ok,
-    Err,
-}
+// enum Res {
+//     Ok,
+//     Err,
+// }
+// 
+// struct Pos {
+//     x I32,
+//     y I32,
+// }
 
-struct Pos {
-    x Int,
-    y Int,
-}
-
-fn main() Int {
+fn main() I32 {
     // This is a work in progress
     // let res = Res::Ok;
 
-    let pos = Pos { x: 5, y: 100 };
-    printf(&c"pos: { x: %d, y: %d }\n", pos.x, pos.y);
+    let arr = [1];
+    arr[0] = 2;
 
-    let arr = [20, 35, 65, 87];
-    printf(&c"res: %d, %d\n", arr[0], arr[3]);
+    printf(&c"[%d]\n", arr[0]);
 
     0
 }
-

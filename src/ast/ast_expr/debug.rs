@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast,
-        ast_block::{AstStatement, StatementKind},
+        ast_block::{AstStatement, Lvalue, LvalueKind, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
     },
     interner::{Interner, SharedInterner},
@@ -153,15 +153,35 @@ impl Ast {
         }
     }
 
+    pub fn lvalue_to_debug_expr(&self, lvalue: &Lvalue) -> DebugExprKind {
+        match &lvalue.kind {
+            LvalueKind::Ident { ident_id, .. } => DebugExprKind::Atom(DebugAtom::Ident(
+                self.interner.read().resolve(*ident_id).to_string(),
+            )),
+            LvalueKind::ArrayAccess { base, index } => {
+                DebugExprKind::Op(Box::new(DebugOp::ArrayAccess {
+                    left: self.lvalue_to_debug_expr(base),
+                    right: self.expr_to_debug(index),
+                }))
+            }
+            LvalueKind::FieldAccess { base, field } => DebugExprKind::Op(Box::new(DebugOp::Dot {
+                left: self.lvalue_to_debug_expr(base),
+                right: DebugExprKind::Atom(DebugAtom::Ident(
+                    self.interner.read().resolve(*field).to_string(),
+                )),
+            })),
+        }
+    }
+
     pub fn statement_to_debug(&self, stmt: &AstStatement) -> DebugStatement {
         match &stmt.kind {
             StatementKind::Decleration { ident_id, expr, .. } => DebugStatement::Declaration {
                 ident: self.interner.read().resolve(*ident_id).to_string(),
                 expr: self.expr_to_debug(expr),
             },
-            StatementKind::Assignment { ident_id, expr, .. } => DebugStatement::Assignment {
-                ident: self.interner.read().resolve(*ident_id).to_string(),
-                expr: self.expr_to_debug(expr),
+            StatementKind::Assignment { lhs, rhs } => DebugStatement::Assignment {
+                lhs: self.lvalue_to_debug_expr(lhs),
+                rhs: self.expr_to_debug(rhs),
             },
             StatementKind::Expr(expr) => DebugStatement::Expr(self.expr_to_debug(expr)),
             StatementKind::ExplicitReturn(expr) => {
@@ -191,8 +211,8 @@ pub enum DebugStatement {
         expr: DebugExprKind,
     },
     Assignment {
-        ident: String,
-        expr: DebugExprKind,
+        lhs: DebugExprKind,
+        rhs: DebugExprKind,
     },
     Expr(DebugExprKind),
     ExplicitReturn(DebugExprKind),
@@ -210,7 +230,7 @@ pub enum DebugStatement {
 #[derive(Debug, PartialEq)]
 pub enum DebugAtom {
     Ident(String),
-    Int(i32),
+    Int(i128),
     Bool(bool),
     Str(String),
     CStr(String),

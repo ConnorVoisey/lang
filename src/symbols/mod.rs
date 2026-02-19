@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         Ast, VarType,
-        ast_block::{AstBlock, AstStatement, StatementKind},
+        ast_block::{AstBlock, AstStatement, Lvalue, LvalueKind, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
         ast_struct::{AstStruct, AstStructField},
@@ -158,9 +158,12 @@ impl SymbolTable {
             }
             // Primitive types don't need resolution
             VarType::Void
-            | VarType::Int
+            | VarType::IntLiteral(_)
+            | VarType::U32
+            | VarType::U64
+            | VarType::I32
+            | VarType::U8
             | VarType::Bool
-            | VarType::Uint
             | VarType::Str
             | VarType::CStr
             | VarType::CChar => {}
@@ -323,9 +326,7 @@ impl SymbolTable {
 
     pub fn register_statement(&mut self, statement: &mut AstStatement) {
         match &mut statement.kind {
-            StatementKind::Decleration { expr, .. }
-            | StatementKind::Assignment { expr, .. }
-            | StatementKind::BlockReturn { expr, .. } => {
+            StatementKind::Decleration { expr, .. } | StatementKind::BlockReturn { expr, .. } => {
                 self.register_expr(expr);
             }
             StatementKind::Expr(ast_expr) | StatementKind::ExplicitReturn(ast_expr) => {
@@ -335,9 +336,31 @@ impl SymbolTable {
                 self.register_expr(condition);
                 self.register_block(block);
             }
+            StatementKind::Assignment { lhs, rhs } => {
+                self.register_lvalue(lhs);
+                self.register_expr(rhs);
+            }
             StatementKind::Break { .. } => (),
         };
     }
+    pub fn register_lvalue(&mut self, lvalue: &mut Lvalue) {
+        match &mut lvalue.kind {
+            LvalueKind::Ident {
+                ident_id,
+                symbol_id,
+            } => {
+                *symbol_id = self.lookup(*ident_id);
+            }
+            LvalueKind::ArrayAccess { base, index } => {
+                self.register_lvalue(base);
+                self.register_expr(index);
+            }
+            LvalueKind::FieldAccess { base, .. } => {
+                self.register_lvalue(base);
+            }
+        }
+    }
+
     pub fn register_expr(&mut self, expr: &mut AstExpr) {
         match &mut expr.kind {
             ExprKind::Atom(atom) => {
@@ -424,16 +447,19 @@ impl ToTypeKind for VarType {
     fn to_type_kind(&self, types: &mut TypeArena, symbols: &SymbolTable) -> TypeKind {
         match &self {
             VarType::Void => todo!(),
-            VarType::Int => TypeKind::I32,
+            VarType::IntLiteral(val) => TypeKind::IntLiteral(*val),
             VarType::Bool => TypeKind::Bool,
-            VarType::Uint => TypeKind::U64,
+            VarType::U32 => TypeKind::U32,
+            VarType::U64 => TypeKind::U64,
+            VarType::I32 => TypeKind::I32,
+            VarType::U8 => TypeKind::U8,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
             VarType::CChar => todo!(),
             VarType::Custom((_, symbol_id_opt)) => {
                 let symbol_id = match symbol_id_opt {
                     Some(symbol_id) => symbol_id,
-                    None => todo!(),
+                    None => todo!("Get type kind for var type where symbol is none"),
                 };
                 match &symbols.resolve(*symbol_id).kind {
                     SymbolKind::Fn(fn_symbol_data) => todo!(),

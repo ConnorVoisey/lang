@@ -18,7 +18,7 @@ pub enum TokenKind {
     Ident(IdentId),
     CStr(String),
     Str(String),
-    Int(i32),
+    Int(i128),
     SemiColon,
     Colon,
     DoubleColon,

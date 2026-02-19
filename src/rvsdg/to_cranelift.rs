@@ -25,11 +25,12 @@ use rustc_hash::FxHashMap;
 /// Convert an RVSDG type to a Cranelift type
 fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
     match types.kind(type_id) {
-        TypeKind::I32 => Some(types::I64),
+        TypeKind::IntLiteral(_) | TypeKind::I32 | TypeKind::U32 => Some(types::I64),
+        TypeKind::U8 => Some(types::I8),
         TypeKind::U64 => Some(types::I64),
         TypeKind::Bool => Some(types::I8),
         TypeKind::CStr => Some(types::I64),
-        TypeKind::Array { .. } => todo!("This should probably be a pointer"),
+        TypeKind::Array { .. } => Some(types::I64),
         TypeKind::Enum(_) => todo!(),
         TypeKind::Ref(_) => Some(types::I64),
         TypeKind::Str => unreachable!(
@@ -54,9 +55,6 @@ pub struct RvsdgToCranelift<'a> {
 
     // Map RVSDG function IDs to Cranelift function IDs
     func_map: FxHashMap<FunctionId, ClFuncId>,
-
-    // Current function being compiled
-    current_function: Option<FunctionId>,
 }
 
 pub struct FunctionCompiler<'a, 'b> {
@@ -90,7 +88,6 @@ impl<'a> RvsdgToCranelift<'a> {
             symbols,
             struct_layout_info,
             func_map: FxHashMap::default(),
-            current_function: None,
         }
     }
 
@@ -799,34 +796,6 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 node.kind
             )
         })
-    }
-
-    /// Get the StructId from a pointer value by dereferencing its type
-    fn get_struct_id_from_ptr(&self, ptr_value_id: ValueId) -> color_eyre::Result<StructId> {
-        let ptr_node = self.rvsdg_func.node(ptr_value_id.node);
-        let ptr_type = ptr_node.output_types[ptr_value_id.output_index as usize];
-
-        // Handle both Ref(Struct) and Struct directly
-        // (Alloc currently returns Struct instead of Ref(Struct))
-        let struct_type = match self.module.types.kind(ptr_type) {
-            TypeKind::Ref(inner_type) => *inner_type,
-            TypeKind::Struct(_) => ptr_type, // Already a struct type (from Alloc)
-            _ => {
-                return Err(color_eyre::eyre::eyre!(
-                    "Expected pointer or struct type for struct field access, got {:?}",
-                    self.module.types.kind(ptr_type)
-                ));
-            }
-        };
-
-        // Extract the StructId from the type
-        match self.module.types.kind(struct_type) {
-            TypeKind::Struct(struct_id) => Ok(*struct_id),
-            _ => Err(color_eyre::eyre::eyre!(
-                "Expected struct type, got {:?}",
-                self.module.types.kind(struct_type)
-            )),
-        }
     }
 
     /// Get the size and alignment for a type

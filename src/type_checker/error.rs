@@ -92,6 +92,18 @@ pub enum TypeCheckingError {
 
     #[error("Break statement outside of loop")]
     BreakOutsideLoop { break_span: Span },
+
+    #[error("Cannot index into non-array type {got_type_str} on the left side of an assignment")]
+    AssignIndexNonArray {
+        got_type_str: String,
+        lhs_span: Span,
+    },
+
+    #[error("Array index must be an integer, got {got_type_str}")]
+    AssignIndexNotInteger {
+        got_type_str: String,
+        index_span: Span,
+    },
 }
 
 impl ToDiagnostic for TypeCheckingError {
@@ -245,6 +257,22 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_notes(vec![String::from(
                     "Adding an element to this array will give it a type",
                 )]),
+            TypeCheckingError::AssignIndexNonArray { lhs_span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, lhs_span.start..lhs_span.end)
+                        .with_message("this is not an array"),
+                ])
+                .with_notes(vec![String::from(
+                    "Only arrays can be indexed in an assignment target.",
+                )]),
+            TypeCheckingError::AssignIndexNotInteger { index_span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, index_span.start..index_span.end)
+                        .with_message("index must be an integer"),
+                ])
+                .with_notes(vec![String::from("Array indices must be Int or Uint.")]),
         }
     }
 }

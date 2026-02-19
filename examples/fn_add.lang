@@ -3,18 +3,18 @@ import {
 
 extern "C" {
     // This isn't the actual printf signature, but we won't have variadic functions
-    fn printf(str &CStr, message &CStr, total Int) Int;
+    fn printf(str &CStr, message &CStr, total I32) I32;
 }
 
-fn main() Int {
+fn main() I32 {
     calc(&c"testing calculation");
 }
 
-fn add(num1 Int, num2 Int) Int {
+fn add(num1 I32, num2 I32) I32 {
     num1 + num2
 }
 
-fn calc(message &CStr) Int {
+fn calc(message &CStr) I32 {
     let x = 5;
     let y = x + 2;
     let z = add(x, y + 5);

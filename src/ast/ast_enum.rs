@@ -198,7 +198,7 @@ mod test {
 
     #[test]
     fn enum_with_basic_union() {
-        let (mut ast, mut symbols) = parse_debug_setup("enum Foo { Bar(Str), Baz(Int) }");
+        let (mut ast, mut symbols) = parse_debug_setup("enum Foo { Bar(Str), Baz(I32) }");
         ast.next_token();
         ast.parse_enum(&mut symbols);
         dbg!(&ast.enums);
@@ -206,7 +206,7 @@ mod test {
             debug_enums(&ast),
             vec![vec![
                 ("Bar".to_string(), VarType::Str),
-                ("Baz".to_string(), VarType::Int)
+                ("Baz".to_string(), VarType::I32)
             ]]
         );
     }
@@ -216,8 +216,8 @@ mod test {
         let (mut ast, mut symbols) = parse_debug_setup(
             r#"
 struct Coordinate {
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 }
 
 enum Foo {

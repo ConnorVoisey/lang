@@ -3,7 +3,7 @@ use std::iter::once;
 use crate::{
     ast::{
         Ast,
-        ast_block::{AstBlock, AstStatement, StatementKind},
+        ast_block::{AstBlock, AstStatement, Lvalue, LvalueKind, StatementKind},
         ast_expr::{AstExpr, Atom, ExprKind, Op},
         ast_fn::AstFunc,
         ast_struct::AstStruct,
@@ -144,34 +144,18 @@ impl<'a> TypeChecker<'a> {
                 }
                 None
             }
-            StatementKind::Assignment {
-                ident_token_at: _,
-                ident_id: _,
-                symbol_id,
-                expr,
-            } => {
-                let new_type_id = self
-                    .check_expr(expr, return_type_id, fn_symbol_id, inside_loop)
-                    .unwrap();
-                let sym = self.symbols.resolve(symbol_id.unwrap());
-                match &sym.kind {
-                    SymbolKind::Var(data) => {
-                        if self
-                            .arena
-                            .unify(data.type_id.unwrap(), new_type_id)
-                            .is_err()
-                        {
-                            self.errors.push(TypeCheckingError::AssignmentMismatch {
-                                assigned_type_str: self.arena.id_to_string(new_type_id),
-                                assigned_type_span: expr.span.clone(),
-                                var_type_str: self.arena.id_to_string(data.type_id.unwrap()),
-                                var_decl_span: sym.ident_span.clone(),
-                            });
-                        }
+            StatementKind::Assignment { lhs, rhs } => {
+                let lhs_type = self.check_lvalue(lhs, return_type_id, fn_symbol_id, inside_loop);
+                let rhs_type = self.check_expr(rhs, return_type_id, fn_symbol_id, inside_loop);
+                if let (Some(lhs_t), Some(rhs_t)) = (lhs_type, rhs_type) {
+                    if self.arena.unify(lhs_t, rhs_t).is_err() {
+                        self.errors.push(TypeCheckingError::AssignmentMismatch {
+                            assigned_type_str: self.arena.id_to_string(rhs_t),
+                            assigned_type_span: rhs.span.clone(),
+                            var_type_str: self.arena.id_to_string(lhs_t),
+                            var_decl_span: lhs.span.clone(),
+                        });
                     }
-                    _ => unreachable!(
-                        "Just checked that the statement was a var so the symbol for it should be a var as well"
-                    ),
                 }
                 None
             }
@@ -258,6 +242,67 @@ impl<'a> TypeChecker<'a> {
             }
         }
     }
+    fn check_lvalue(
+        &mut self,
+        lvalue: &mut Lvalue,
+        return_type_id: Option<TypeId>,
+        fn_symbol_id: SymbolId,
+        inside_loop: bool,
+    ) -> Option<TypeId> {
+        match &mut lvalue.kind {
+            LvalueKind::Ident { symbol_id, .. } => {
+                let sym = self.symbols.resolve((*symbol_id)?);
+                match &sym.kind {
+                    SymbolKind::Var(data) => data.type_id,
+                    SymbolKind::FnArg(data) => data.type_id,
+                    _ => None,
+                }
+            }
+            LvalueKind::ArrayAccess { base, index } => {
+                let base_span = base.span.clone();
+                let base_type_id =
+                    self.check_lvalue(base, return_type_id, fn_symbol_id, inside_loop)?;
+
+                // Separate the borrow of arena.kind from any later self.* calls.
+                let inner_type: Option<TypeId> = match self.arena.kind(base_type_id) {
+                    TypeKind::Array { inner_type, .. } => Some(*inner_type),
+                    _ => None,
+                };
+                if inner_type.is_none() {
+                    self.errors.push(TypeCheckingError::AssignIndexNonArray {
+                        got_type_str: self.arena.id_to_string(base_type_id),
+                        lhs_span: base_span,
+                    });
+                }
+
+                let index_span = index.span.clone();
+                let index_type_id =
+                    self.check_expr(index, return_type_id, fn_symbol_id, inside_loop)?;
+                let index_is_valid = matches!(
+                    self.arena.kind(index_type_id),
+                    TypeKind::IntLiteral(_)
+                        | TypeKind::I32
+                        | TypeKind::U8
+                        | TypeKind::U32
+                        | TypeKind::U64
+                );
+                if !index_is_valid {
+                    self.errors.push(TypeCheckingError::AssignIndexNotInteger {
+                        got_type_str: self.arena.id_to_string(index_type_id),
+                        index_span,
+                    });
+                }
+
+                inner_type
+            }
+            LvalueKind::FieldAccess { base, .. } => {
+                // TODO: implement when struct field assignment is added
+                self.check_lvalue(base, return_type_id, fn_symbol_id, inside_loop);
+                None
+            }
+        }
+    }
+
     fn check_block(
         &mut self,
         block: &mut AstBlock,
@@ -286,7 +331,7 @@ impl<'a> TypeChecker<'a> {
         match &mut expr.kind {
             ExprKind::Atom(atom) => {
                 expr.type_id = Some(match atom {
-                    Atom::Int(_) => self.arena.int_type,
+                    Atom::Int(val) => self.arena.make(TypeKind::IntLiteral(*val)),
                     Atom::Bool(_) => self.arena.bool_type,
                     Atom::Str(_) => self.arena.str_type,
                     Atom::CStr(_) => self.arena.cstr_type,
@@ -682,7 +727,11 @@ impl<'a> TypeChecker<'a> {
                             self.check_expr(right, return_type_id, fn_symbol_id, inside_loop)?;
                         let right_kind = self.arena.kind(right_ty_id);
                         match right_kind {
-                            TypeKind::I32 | TypeKind::U64 => (),
+                            TypeKind::IntLiteral(_)
+                            | TypeKind::I32
+                            | TypeKind::U8
+                            | TypeKind::U32
+                            | TypeKind::U64 => (),
                             t => todo!("{:?} is not valid for array access", t),
                         }
 
@@ -891,6 +940,7 @@ mod test {
         }
     }
 
+    #[derive(Debug)]
     struct TypeCheckResult {
         errors: Vec<TypeCheckingError>,
         ast: Ast,
@@ -924,12 +974,12 @@ mod test {
 
     #[test]
     fn test_simple_addition() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 1 + 2 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 1 + 2 }").check();
         result.assert_no_errors();
     }
     #[test]
     fn test_mixed_type_arithmetic() {
-        let result = TypeCheckTestCase::from_source(r#"fn main() Int { 1 + true }"#).check();
+        let result = TypeCheckTestCase::from_source(r#"fn main() I32 { 1 + true }"#).check();
         result.assert_error_count(1);
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
@@ -940,8 +990,8 @@ mod test {
     fn test_function_wrong_arg_count() {
         let result = TypeCheckTestCase::from_source(
             r#"
-              fn add(a Int, b Int) Int { a + b }
-              fn main() Int { add(1) }
+              fn add(a I32, b I32) I32 { a + b }
+              fn main() I32 { add(1) }
           "#,
         )
         .check();
@@ -965,7 +1015,7 @@ mod test {
     fn test_if_non_bool_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-              fn main() Int {
+              fn main() I32 {
                   if 5 { 1 } else { 2 }
               }
           "#,
@@ -979,7 +1029,7 @@ mod test {
     fn test_if_else_branch_mismatch() {
         let result = TypeCheckTestCase::from_source(
             r#"
-              fn main() Int {
+              fn main() I32 {
                   if true { 1 } else { false }
               }
           "#,
@@ -993,44 +1043,45 @@ mod test {
 
     #[test]
     fn test_subtraction_valid() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 10 - 5 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 10 - 5 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_multiplication_valid() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 3 * 7 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 3 * 7 }").check();
+        dbg!(&result);
         result.assert_no_errors();
     }
 
     #[test]
     fn test_division_valid() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 20 / 4 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 20 / 4 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_subtraction_left_bool() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { true - 5 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { true - 5 }").check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
 
     #[test]
     fn test_multiplication_right_bool() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 5 * false }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 5 * false }").check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
 
     #[test]
     fn test_division_left_string() {
-        let result = TypeCheckTestCase::from_source(r#"fn main() Int { "hello" / 2 }"#).check();
+        let result = TypeCheckTestCase::from_source(r#"fn main() I32 { "hello" / 2 }"#).check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
 
     #[test]
     fn test_nested_arithmetic() {
         let result =
-            TypeCheckTestCase::from_source("fn main() Int { (1 + 2) * (3 - 4) / 5 }").check();
+            TypeCheckTestCase::from_source("fn main() I32 { (1 + 2) * (3 - 4) / 5 }").check();
         result.assert_no_errors();
     }
 
@@ -1038,7 +1089,7 @@ mod test {
     fn test_arithmetic_with_variables() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 let y = 20;
                 x + y * 2
@@ -1053,8 +1104,8 @@ mod test {
     fn test_arithmetic_with_function_result() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_num() Int { 42 }
-            fn main() Int { get_num() + 10 }
+            fn get_num() I32 { 42 }
+            fn main() I32 { get_num() + 10 }
         "#,
         )
         .check();
@@ -1063,14 +1114,14 @@ mod test {
 
     #[test]
     fn test_subtraction_both_sides_wrong() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { true - false }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { true - false }").check();
         result.assert_error_count(2);
     }
 
     #[test]
     fn test_complex_arithmetic_chain() {
         let result =
-            TypeCheckTestCase::from_source("fn main() Int { 1 + 2 - 3 * 4 / 5 + 6 }").check();
+            TypeCheckTestCase::from_source("fn main() I32 { 1 + 2 - 3 * 4 / 5 + 6 }").check();
         result.assert_no_errors();
     }
 
@@ -1078,37 +1129,37 @@ mod test {
 
     #[test]
     fn test_negation_on_int() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { -42 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { -42 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_negation_on_bool() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { -true }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { -true }").check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
 
     #[test]
     fn test_negation_on_string() {
-        let result = TypeCheckTestCase::from_source(r#"fn main() Int { -"hello" }"#).check();
+        let result = TypeCheckTestCase::from_source(r#"fn main() I32 { -"hello" }"#).check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::Mismatch { .. }));
     }
 
     #[test]
     fn test_double_negation() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { --5 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { --5 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_triple_negation() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { ---10 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { ---10 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_negation_on_expression() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { -(5 + 3) }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { -(5 + 3) }").check();
         result.assert_no_errors();
     }
 
@@ -1116,7 +1167,7 @@ mod test {
 
     #[test]
     fn test_reference_on_int() {
-        let result = TypeCheckTestCase::from_source("fn main() &Int { &42 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() &I32 { &42 }").check();
         result.assert_no_errors();
     }
 
@@ -1130,7 +1181,7 @@ mod test {
     fn test_nested_reference() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 5;
                 let y = &x;
                 10
@@ -1145,7 +1196,7 @@ mod test {
     fn test_reference_in_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 5;
                 let y = &x;
                 10
@@ -1255,7 +1306,7 @@ mod test {
     fn test_comparison_with_function_call() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_num() Int { 42 }
+            fn get_num() I32 { 42 }
             fn main() Bool { get_num() > 10 }
         "#,
         )
@@ -1267,8 +1318,8 @@ mod test {
     fn test_comparison_both_function_calls() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_a() Int { 10 }
-            fn get_b() Int { 20 }
+            fn get_a() I32 { 10 }
+            fn get_b() I32 { 20 }
             fn main() Bool { get_a() < get_b() }
         "#,
         )
@@ -1282,8 +1333,8 @@ mod test {
     fn test_function_no_args() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_value() Int { 42 }
-            fn main() Int { get_value() }
+            fn get_value() I32 { 42 }
+            fn main() I32 { get_value() }
         "#,
         )
         .check();
@@ -1294,8 +1345,8 @@ mod test {
     fn test_function_three_args() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add_three(a Int, b Int, c Int) Int { a + b + c }
-            fn main() Int { add_three(1, 2, 3) }
+            fn add_three(a I32, b I32, c I32) I32 { a + b + c }
+            fn main() I32 { add_three(1, 2, 3) }
         "#,
         )
         .check();
@@ -1306,8 +1357,8 @@ mod test {
     fn test_function_too_many_args() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add(a Int, b Int) Int { a + b }
-            fn main() Int { add(1, 2, 3) }
+            fn add(a I32, b I32) I32 { a + b }
+            fn main() I32 { add(1, 2, 3) }
         "#,
         )
         .check();
@@ -1327,8 +1378,8 @@ mod test {
     fn test_function_wrong_first_arg() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add(a Int, b Int) Int { a + b }
-            fn main() Int { add(true, 2) }
+            fn add(a I32, b I32) I32 { a + b }
+            fn main() I32 { add(true, 2) }
         "#,
         )
         .check();
@@ -1339,8 +1390,8 @@ mod test {
     fn test_function_wrong_second_arg() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add(a Int, b Int) Int { a + b }
-            fn main() Int { add(1, false) }
+            fn add(a I32, b I32) I32 { a + b }
+            fn main() I32 { add(1, false) }
         "#,
         )
         .check();
@@ -1351,8 +1402,8 @@ mod test {
     fn test_function_wrong_middle_arg() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add_three(a Int, b Int, c Int) Int { a + b + c }
-            fn main() Int { add_three(1, true, 3) }
+            fn add_three(a I32, b I32, c I32) I32 { a + b + c }
+            fn main() I32 { add_three(1, true, 3) }
         "#,
         )
         .check();
@@ -1363,8 +1414,8 @@ mod test {
     fn test_function_multiple_wrong_args() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add(a Int, b Int) Int { a + b }
-            fn main() Int { add(true, false) }
+            fn add(a I32, b I32) I32 { a + b }
+            fn main() I32 { add(true, false) }
         "#,
         )
         .check();
@@ -1375,9 +1426,9 @@ mod test {
     fn test_nested_function_calls() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn inner(x Int) Int { x * 2 }
-            fn outer(y Int) Int { inner(y + 1) }
-            fn main() Int { outer(5) }
+            fn inner(x I32) I32 { x * 2 }
+            fn outer(y I32) I32 { inner(y + 1) }
+            fn main() I32 { outer(5) }
         "#,
         )
         .check();
@@ -1388,8 +1439,8 @@ mod test {
     fn test_function_call_result_in_expr() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_val() Int { 10 }
-            fn main() Int { get_val() + 5 }
+            fn get_val() I32 { 10 }
+            fn main() I32 { get_val() + 5 }
         "#,
         )
         .check();
@@ -1400,7 +1451,7 @@ mod test {
     fn test_call_variable_not_function() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 5;
                 x()
             }
@@ -1414,10 +1465,10 @@ mod test {
     fn test_multiple_function_calls_in_expr() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn a() Int { 1 }
-            fn b() Int { 2 }
-            fn c() Int { 3 }
-            fn main() Int { a() + b() * c() }
+            fn a() I32 { 1 }
+            fn b() I32 { 2 }
+            fn c() I32 { 3 }
+            fn main() I32 { a() + b() * c() }
         "#,
         )
         .check();
@@ -1430,7 +1481,7 @@ mod test {
     fn test_if_bool_literal() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true { 42 } else { 0 }
             }
         "#,
@@ -1443,7 +1494,7 @@ mod test {
     fn test_if_comparison_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if 5 < 10 { 1 } else { 2 }
             }
         "#,
@@ -1456,7 +1507,7 @@ mod test {
     fn test_if_without_else() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true { 42 };
                 0
             }
@@ -1470,7 +1521,7 @@ mod test {
     fn test_if_else_matching_types() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true { 10 } else { 20 }
             }
         "#,
@@ -1483,7 +1534,7 @@ mod test {
     fn test_multiple_else_if_matching() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if false { 1 } else if true { 2 } else if false { 3 } else { 4 }
             }
         "#,
@@ -1496,7 +1547,7 @@ mod test {
     fn test_multiple_else_if_mismatched() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if false { 1 } else if true { false } else { 3 }
             }
         "#,
@@ -1509,7 +1560,7 @@ mod test {
     fn test_nested_if_expressions() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true {
                     if false { 1 } else { 2 }
                 } else {
@@ -1526,7 +1577,7 @@ mod test {
     fn test_if_in_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 (if true { 10 } else { 20 }) + 5
             }
         "#,
@@ -1539,8 +1590,8 @@ mod test {
     fn test_if_as_function_arg() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn use_val(x Int) Int { x }
-            fn main() Int {
+            fn use_val(x I32) I32 { x }
+            fn main() I32 {
                 use_val(if true { 5 } else { 10 })
             }
         "#,
@@ -1553,7 +1604,7 @@ mod test {
     fn test_if_else_if_non_bool_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true {
                     1 
                 } else if 5 {
@@ -1572,7 +1623,7 @@ mod test {
     fn test_if_with_block_body() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true {
                     let x = 5;
                     x + 10
@@ -1590,7 +1641,7 @@ mod test {
     fn test_if_else_type_mismatch_bool_int() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true { true } else { 10 }
             }
         "#,
@@ -1603,7 +1654,7 @@ mod test {
     fn test_if_only_else_if_no_final_else() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if false { 1 } else if true { 2 };
                 42
             }
@@ -1617,7 +1668,7 @@ mod test {
     fn test_if_string_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if "hello" { 1 } else { 2 }
             }
         "#,
@@ -1632,7 +1683,7 @@ mod test {
     fn test_while_bool_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 while true { break; };
                 0
             }
@@ -1646,7 +1697,7 @@ mod test {
     fn test_while_int_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 while 5 { break; };
                 0
             }
@@ -1660,7 +1711,7 @@ mod test {
     fn test_while_comparison_condition() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 0;
                 while x < 10 { break; };
                 0
@@ -1675,7 +1726,7 @@ mod test {
     fn test_while_with_body() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 0;
                 while x < 10 {
                     let y = x + 1;
@@ -1693,7 +1744,7 @@ mod test {
     fn test_break_inside_while() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 while true { break; };
                 0
             }
@@ -1707,7 +1758,7 @@ mod test {
     fn test_break_outside_while() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 break;
                 0
             }
@@ -1721,7 +1772,7 @@ mod test {
     fn test_break_inside_nested_while() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 while true {
                     while false {
                         break;
@@ -1740,7 +1791,7 @@ mod test {
     fn test_while_empty_body() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 while false { };
                 0
             }
@@ -1756,7 +1807,7 @@ mod test {
     fn test_var_decl_int() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 42;
                 x
             }
@@ -1784,7 +1835,7 @@ mod test {
     fn test_var_decl_with_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10 + 20;
                 x
             }
@@ -1798,8 +1849,8 @@ mod test {
     fn test_var_decl_with_function_call() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_val() Int { 42 }
-            fn main() Int {
+            fn get_val() I32 { 42 }
+            fn main() I32 {
                 let x = get_val();
                 x
             }
@@ -1813,7 +1864,7 @@ mod test {
     fn test_multiple_var_decls() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 let y = 20;
                 let z = 30;
@@ -1829,7 +1880,7 @@ mod test {
     fn test_var_decl_complex_expr() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = (10 + 20) * 3 - 5;
                 x
             }
@@ -1845,7 +1896,7 @@ mod test {
     fn test_assignment_compatible_type() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 x = 20;
                 x
@@ -1860,7 +1911,7 @@ mod test {
     fn test_assignment_incompatible_int_to_bool() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = true;
                 x = 10;
                 0
@@ -1875,7 +1926,7 @@ mod test {
     fn test_assignment_incompatible_bool_to_int() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 x = true;
                 x
@@ -1890,8 +1941,8 @@ mod test {
     fn test_assignment_function_result() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_val() Int { 42 }
-            fn main() Int {
+            fn get_val() I32 { 42 }
+            fn main() I32 {
                 let x = 0;
                 x = get_val();
                 x
@@ -1906,7 +1957,7 @@ mod test {
     fn test_assignment_arithmetic_result() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 x = x + 5;
                 x
@@ -1921,7 +1972,7 @@ mod test {
     fn test_multiple_assignments() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 let y = 20;
                 x = 30;
@@ -1938,7 +1989,7 @@ mod test {
     fn test_reassignment_same_type() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 10;
                 x = 20;
                 x = 30;
@@ -1954,7 +2005,7 @@ mod test {
     fn test_assignment_to_if_result() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 0;
                 x = if true { 10 } else { 20 };
                 x
@@ -1971,10 +2022,10 @@ mod test {
     fn test_explicit_return_matching() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 return 42;
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -1985,10 +2036,10 @@ mod test {
     fn test_explicit_return_mismatched() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 return true;
             }
-            fn main() Int { 0 }
+            fn main() I32 { 0 }
         "#,
         )
         .check();
@@ -1997,13 +2048,13 @@ mod test {
 
     #[test]
     fn test_block_return_matching() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { 42 }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { 42 }").check();
         result.assert_no_errors();
     }
 
     #[test]
     fn test_block_return_mismatched() {
-        let result = TypeCheckTestCase::from_source("fn main() Int { true }").check();
+        let result = TypeCheckTestCase::from_source("fn main() I32 { true }").check();
         result.assert_has_error(|e| matches!(e, TypeCheckingError::FnInvalidReturnType { .. }));
     }
 
@@ -2011,12 +2062,12 @@ mod test {
     fn test_return_in_nested_block() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 {
                     return 42;
                 }
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -2027,14 +2078,14 @@ mod test {
     fn test_return_in_if_branch() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 if true {
                     return 42;
                 } else {
                     return 0;
                 }
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -2045,14 +2096,14 @@ mod test {
     fn test_return_in_else_branch() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 if false {
                     0
                 } else {
                     return 42;
                 }
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -2063,13 +2114,13 @@ mod test {
     fn test_early_return_wrong_type() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 if true {
                     return false;
                 };
                 42
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -2080,7 +2131,7 @@ mod test {
     fn test_multiple_returns_all_matching() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo(x Int) Int {
+            fn foo(x I32) I32 {
                 if x < 0 {
                     return 0;
                 };
@@ -2089,7 +2140,7 @@ mod test {
                 };
                 x
             }
-            fn main() Int { foo(50) }
+            fn main() I32 { foo(50) }
         "#,
         )
         .check();
@@ -2100,10 +2151,10 @@ mod test {
     fn test_return_with_expression() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 return 10 + 20 * 3;
             }
-            fn main() Int { foo() }
+            fn main() I32 { foo() }
         "#,
         )
         .check();
@@ -2116,8 +2167,8 @@ mod test {
     fn test_struct_field_access() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10, y: 20 };
                 p.x
             }
@@ -2131,8 +2182,8 @@ mod test {
     fn test_struct_creation_all_fields() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10, y: 20 };
                 0
             }
@@ -2146,8 +2197,8 @@ mod test {
     fn test_struct_creation_missing_field() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10 };
                 0
             }
@@ -2161,8 +2212,8 @@ mod test {
     fn test_struct_creation_extra_field() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10, y: 20, z: 30 };
                 0
             }
@@ -2176,8 +2227,8 @@ mod test {
     fn test_struct_creation_wrong_field_type() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: true, y: 20 };
                 0
             }
@@ -2191,8 +2242,8 @@ mod test {
     fn test_struct_creation_duplicate_field() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10, x: 20 };
                 0
             }
@@ -2207,7 +2258,7 @@ mod test {
         let result = TypeCheckTestCase::from_source(
             r#"
             struct Empty { }
-            fn main() Int {
+            fn main() I32 {
                 let e = Empty { };
                 0
             }
@@ -2221,9 +2272,9 @@ mod test {
     fn test_struct_as_function_param() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn use_point(p Point) Int { 0 }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn use_point(p Point) I32 { 0 }
+            fn main() I32 {
                 let p = Point { x: 10, y: 20 };
                 use_point(p)
             }
@@ -2237,8 +2288,8 @@ mod test {
     fn test_struct_field_in_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn main() I32 {
                 let p = Point { x: 10, y: 20 };
                 p.x + p.y
             }
@@ -2252,9 +2303,9 @@ mod test {
     fn test_nested_struct_field_access() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Inner { val Int }
+            struct Inner { val I32 }
             struct Outer { inner Inner }
-            fn main() Int {
+            fn main() I32 {
                 let inner = Inner { val: 42 };
                 let outer = Outer { inner: inner };
                 outer.inner.val
@@ -2269,7 +2320,7 @@ mod test {
     fn test_field_access_on_non_struct() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = 42;
                 x.field
             }
@@ -2285,7 +2336,7 @@ mod test {
     fn test_array_init_homogeneous_ints() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [1, 2, 3];
                 0
             }
@@ -2299,7 +2350,7 @@ mod test {
     fn test_array_init_homogeneous_bools() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [true, false, true];
                 0
             }
@@ -2313,7 +2364,7 @@ mod test {
     fn test_array_init_heterogeneous() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [1, true, 3];
                 0
             }
@@ -2327,7 +2378,7 @@ mod test {
     fn test_array_init_empty() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [];
                 0
             }
@@ -2341,7 +2392,7 @@ mod test {
     fn test_array_with_expressions() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [1 + 2, 3 * 4, 5 - 1];
                 0
             }
@@ -2355,8 +2406,8 @@ mod test {
     fn test_array_with_function_results() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn get_val() Int { 42 }
-            fn main() Int {
+            fn get_val() I32 { 42 }
+            fn main() I32 {
                 let arr = [get_val(), get_val()];
                 0
             }
@@ -2370,7 +2421,7 @@ mod test {
     fn test_nested_arrays() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [[1, 2], [3, 4]];
                 0
             }
@@ -2384,7 +2435,7 @@ mod test {
     fn test_array_mixed_expr_types() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let arr = [10, true];
                 0
             }
@@ -2400,7 +2451,7 @@ mod test {
     fn test_empty_block() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 { };
                 0
             }
@@ -2414,7 +2465,7 @@ mod test {
     fn test_block_single_statement() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 { let x = 5; };
                 0
             }
@@ -2428,7 +2479,7 @@ mod test {
     fn test_block_multiple_statements() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 {
                     let x = 5;
                     let y = 10;
@@ -2446,7 +2497,7 @@ mod test {
     fn test_block_with_return_value() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let x = { 42 };
                 x
             }
@@ -2460,7 +2511,7 @@ mod test {
     fn test_nested_blocks() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 {
                     {
                         {
@@ -2479,7 +2530,7 @@ mod test {
     fn test_block_in_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 { 10 } + { 20 }
             }
         "#,
@@ -2494,12 +2545,12 @@ mod test {
     fn test_multiple_errors_in_function() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn foo() Int {
+            fn foo() I32 {
                 let x = true + false;
                 let y = 10 < "hello";
                 if 5 { 1 } else { 2 }
             }
-            fn main() Int { 0 }
+            fn main() I32 { 0 }
         "#,
         )
         .check();
@@ -2510,7 +2561,7 @@ mod test {
     fn test_complex_nested_expression() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 ((1 + 2) * (3 - 4)) / ((5 + 6) - (7 * 8))
             }
         "#,
@@ -2523,9 +2574,9 @@ mod test {
     fn test_function_calling_function() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn helper(x Int) Int { x * 2 }
-            fn caller(y Int) Int { helper(y + 1) }
-            fn main() Int { caller(10) }
+            fn helper(x I32) I32 { x * 2 }
+            fn caller(y I32) I32 { helper(y + 1) }
+            fn main() I32 { caller(10) }
         "#,
         )
         .check();
@@ -2536,7 +2587,7 @@ mod test {
     fn test_mixed_control_flow() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 let result = 0;
                 while result < 10 {
                     if result < 5 {
@@ -2557,7 +2608,7 @@ mod test {
     fn test_deep_nesting() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 if true {
                     let x = {
                         if false {
@@ -2584,11 +2635,11 @@ mod test {
     fn test_program_with_multiple_functions() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn add(a Int, b Int) Int { a + b }
-            fn sub(a Int, b Int) Int { a - b }
-            fn mul(a Int, b Int) Int { a * b }
-            fn div(a Int, b Int) Int { a / b }
-            fn main() Int {
+            fn add(a I32, b I32) I32 { a + b }
+            fn sub(a I32, b I32) I32 { a - b }
+            fn mul(a I32, b I32) I32 { a * b }
+            fn div(a I32, b I32) I32 { a / b }
+            fn main() I32 {
                 add(10, sub(20, mul(3, div(12, 4))))
             }
         "#,
@@ -2601,9 +2652,9 @@ mod test {
     fn test_function_with_struct_param() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn use_point(p Point) Int { p.x + p.y }
-            fn main() Int {
+            struct Point { x I32, y I32 }
+            fn use_point(p Point) I32 { p.x + p.y }
+            fn main() I32 {
                 let pt = Point { x: 5, y: 10 };
                 use_point(pt)
             }
@@ -2617,11 +2668,11 @@ mod test {
     fn test_function_returning_struct() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            struct Point { x Int, y Int }
-            fn make_point(x Int, y Int) Point {
+            struct Point { x I32, y I32 }
+            fn make_point(x I32, y I32) Point {
                 Point { x: x, y: y }
             }
-            fn main() Int {
+            fn main() I32 {
                 let p = make_point(10, 20);
                 p.x
             }
@@ -2635,7 +2686,7 @@ mod test {
     fn test_deeply_nested_arithmetic() {
         let result = TypeCheckTestCase::from_source(
             r#"
-            fn main() Int {
+            fn main() I32 {
                 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
             }
         "#,

@@ -51,6 +51,9 @@ pub struct FunctionBuilder<'a> {
     value_cache: FxHashMap<NodeKey, NodeId>,
 
     pub struct_layout_info: &'a StructLayoutInfo<'a>,
+
+    // The void TypeId used to type state token outputs
+    void_type: TypeId,
 }
 
 pub struct RegionBuilder<'a> {
@@ -66,6 +69,7 @@ impl<'a> FunctionBuilder<'a> {
         return_type: TypeId,
         span: Span,
         struct_layout_info: &'a StructLayoutInfo,
+        void_type: TypeId,
     ) -> Self {
         Self {
             func: Function {
@@ -87,6 +91,7 @@ impl<'a> FunctionBuilder<'a> {
             symbol_map: vec![FxHashMap::default()],
             value_cache: FxHashMap::default(),
             struct_layout_info,
+            void_type,
         }
     }
 
@@ -318,7 +323,7 @@ impl<'a> FunctionBuilder<'a> {
         let inputs = AllocInputs::new(state);
         let node = self.alloc_node(
             NodeKind::Alloc { ty, inputs },
-            vec![ty, ty], // [new_state, pointer]
+            vec![self.void_type, ty], // [new_state, pointer]
             span,
         );
         AllocOutputs {
@@ -328,11 +333,10 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn load(&mut self, state: ValueId, addr: ValueId, ty: TypeId, span: Span) -> LoadOutputs {
-        let state_ty = ty; // State type is same as loaded type for simplicity
         let inputs = LoadInputs::new(state, addr);
         let node = self.alloc_node(
             NodeKind::Load { ty, inputs },
-            vec![state_ty, ty], // [new_state, value]
+            vec![self.void_type, ty], // [new_state, value]
             span,
         );
         LoadOutputs {
@@ -352,7 +356,7 @@ impl<'a> FunctionBuilder<'a> {
         let inputs = StoreInputs::new(state, addr, value);
         let node = self.alloc_node(
             NodeKind::Store { ty, inputs },
-            vec![ty], // [new_state]
+            vec![self.void_type], // [new_state]
             span,
         );
         StoreOutputs {

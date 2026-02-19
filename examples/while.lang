@@ -2,10 +2,10 @@ import {
 }
 
 extern "C" {
-    fn printf(str &CStr, val Int) Int;
+    fn printf(str &CStr, val I32) I32;
 }
 
-fn main() Int {
+fn main() I32 {
     let num = 0;
 
     while num < 10 {
