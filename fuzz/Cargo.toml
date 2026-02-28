@@ -1,0 +1,22 @@
+[package]
+name = "lang-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+lang = { path = "..", features = ["fuzzing"] }
+parking_lot = "0.12.4"
+
+[[bin]]
+name = "fuzz_ast_from_tokens"
+path = "fuzz_targets/fuzz_ast_from_tokens.rs"
+doc = false
+
+[workspace]
+members = ["."]

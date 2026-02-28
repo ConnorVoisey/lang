@@ -84,12 +84,21 @@ impl Ast {
 
         let mut fields = vec![];
 
-        while let Some(token) = self.next_token() {
-            match &token.kind {
-                TokenKind::Ident(field_ident_id) => {
+        loop {
+            match &self.next_token() {
+                Some(Token {
+                    kind: TokenKind::Ident(field_ident_id),
+                    ..
+                }) => {
                     let field_ident_id = *field_ident_id;
                     let ident_token_at = self.curr_token_i();
-                    let (var_type, _type_span) = self.parse_var_type();
+                    let (var_type, _type_span) = match self.parse_var_type() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            self.errs.push(AstParseError::TypeParse(e));
+                            return;
+                        }
+                    };
                     fields.push(AstStructField {
                         ident: field_ident_id,
                         ident_token_at,
@@ -108,16 +117,30 @@ impl Ast {
                         }) => {
                             break;
                         }
-                        t => {
-                            dbg!(t);
-                            todo!();
+                        Some(token) => {
+                            let token = token.clone();
+                            self.errs
+                                .push(AstParseError::StructExpectedCommaOrClose { token: token });
+                            return;
+                        }
+                        None => {
+                            self.errs.push(AstParseError::UnexpectedEndOfInput);
+                            return;
                         }
                     }
                 }
-                TokenKind::CurlyBracketClose => break,
-                t => {
-                    dbg!(t);
-                    todo!();
+                Some(Token {
+                    kind: TokenKind::CurlyBracketClose,
+                    ..
+                }) => break,
+                None => {
+                    self.errs.push(AstParseError::UnexpectedEndOfInput);
+                    return;
+                }
+                Some(token) => {
+                    let token = token.clone().clone();
+                    self.errs.push(AstParseError::StructExpectedIdent { token });
+                    return;
                 }
             }
         }

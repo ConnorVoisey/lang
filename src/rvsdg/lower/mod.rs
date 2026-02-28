@@ -16,7 +16,9 @@ use crate::{
     symbols::{SymbolKind, SymbolTable},
     types::{TypeArena, TypeKind},
 };
+use error::LoweringError;
 
+pub mod error;
 pub mod theta;
 
 pub struct AstLowering<'a> {
@@ -37,6 +39,8 @@ pub struct AstLowering<'a> {
     // Track variables modified in current scope (for gamma/theta nodes)
     modified_vars: Vec<SymbolId>,
     struct_layout_info: &'a StructLayoutInfo<'a>,
+
+    pub errors: Vec<LoweringError>,
 }
 
 impl<'a> AstLowering<'a> {
@@ -57,11 +61,12 @@ impl<'a> AstLowering<'a> {
             current_state: None,
             modified_vars: Vec::new(),
             struct_layout_info,
+            errors: Vec::new(),
         }
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn lower_module(mut self) -> Module<'a> {
+    pub fn lower_module(mut self) -> Result<Module<'a>, Vec<LoweringError>> {
         let mut module = Module::new(self.types, self.struct_layout_info, self.interner.clone());
         // First register all functions
 
@@ -78,36 +83,43 @@ impl<'a> AstLowering<'a> {
             self.next_func_id += 1;
             self.func_map.insert(extern_fn.symbol_id, func_id);
 
-            module
-                .extern_functions
-                .push(self.lower_extern_function(extern_fn, func_id));
+            if let Some(extern_func) = self.lower_extern_function(extern_fn, func_id) {
+                module.extern_functions.push(extern_func);
+            }
         }
 
         // Second pass: lower function bodies
         for func in &self.ast.fns {
             let func_id = self.func_map[&func.symbol_id];
-            let mut rvsdg_func = self.lower_function(func, func_id);
-
-            dead_code_elimination(&mut rvsdg_func);
-
-            module.functions.push(rvsdg_func);
+            if let Some(mut rvsdg_func) = self.lower_function(func, func_id) {
+                dead_code_elimination(&mut rvsdg_func);
+                module.functions.push(rvsdg_func);
+            }
         }
 
-        module
+        if !self.errors.is_empty() {
+            return Err(self.errors);
+        }
+
+        Ok(module)
     }
 
     #[tracing::instrument(skip(self, ast_fn, func_id))]
-    fn lower_extern_function(&self, ast_fn: &AstFunc, func_id: FunctionId) -> ExternFunction {
+    fn lower_extern_function(
+        &self,
+        ast_fn: &AstFunc,
+        func_id: FunctionId,
+    ) -> Option<ExternFunction> {
         let symbol = self.symbols.resolve(ast_fn.symbol_id);
         let (param_types, return_type) = match &symbol.kind {
             SymbolKind::Fn(data) => {
-                let fn_type_id = data.fn_type_id.expect("Extern function missing type");
+                let fn_type_id = data.fn_type_id?;
                 match self.types.kind(fn_type_id) {
                     TypeKind::Fn { params, ret, .. } => (params.clone(), *ret),
-                    _ => panic!("Extern function has non-function type"),
+                    _ => return None,
                 }
             }
-            _ => panic!("Extern function symbol is not a function"),
+            _ => return None,
         };
 
         // Create a dummy span - AST functions don't track their full span
@@ -116,27 +128,27 @@ impl<'a> AstLowering<'a> {
             end: ast_fn.fn_token_at + 2,
         };
 
-        ExternFunction {
+        Some(ExternFunction {
             id: func_id,
             name: ast_fn.symbol_id,
             param_types,
             return_type,
             span,
-        }
+        })
     }
 
     #[tracing::instrument(skip(self, ast_fn, func_id))]
-    fn lower_function(&mut self, ast_fn: &AstFunc, func_id: FunctionId) -> Function {
+    fn lower_function(&mut self, ast_fn: &AstFunc, func_id: FunctionId) -> Option<Function> {
         let symbol = self.symbols.resolve(ast_fn.symbol_id);
         let return_type = match &symbol.kind {
             SymbolKind::Fn(data) => {
-                let fn_type_id = data.fn_type_id.expect("Function missing type");
+                let fn_type_id = data.fn_type_id?;
                 match self.types.kind(fn_type_id) {
                     TypeKind::Fn { ret, .. } => *ret,
-                    _ => panic!("Function has non-function type"),
+                    _ => return None,
                 }
             }
-            _ => panic!("Function symbol is not a function"),
+            _ => return None,
         };
 
         // Build parameters
@@ -146,8 +158,8 @@ impl<'a> AstLowering<'a> {
             .map(|arg| {
                 let arg_symbol = self.symbols.resolve(arg.symbol_id);
                 let ty = match &arg_symbol.kind {
-                    SymbolKind::FnArg(data) => data.type_id.expect("Parameter missing type"),
-                    _ => panic!("Parameter symbol is not a function argument"),
+                    SymbolKind::FnArg(data) => data.type_id.unwrap_or(self.types.void_type),
+                    _ => self.types.void_type,
                 };
 
                 // TODO: review if spans are even needed for RVSDG, currently there isn't enough
@@ -226,7 +238,7 @@ impl<'a> AstLowering<'a> {
             func.is_exported = true;
         }
 
-        func
+        Some(func)
     }
 
     fn lower_block(&mut self, builder: &mut FunctionBuilder, block: &AstBlock) -> Option<ValueId> {
@@ -288,7 +300,10 @@ impl<'a> AstLowering<'a> {
                         }
                     }
                     LvalueKind::FieldAccess { .. } => {
-                        todo!("struct field assignment lowering")
+                        self.errors.push(LoweringError::StructFieldAssignment {
+                            span: lhs.span.clone(),
+                        });
+                        return None;
                     }
                     LvalueKind::Ident {
                         symbol_id: None, ..
@@ -482,10 +497,10 @@ impl<'a> AstLowering<'a> {
                 // Struct field access
                 self.lower_struct_field_access(builder, left, right, span)
             }
-            Op::DoubleColon { left, right } => {
-                todo!()
-                // enum variant access
-                // TODO: implement this
+            Op::DoubleColon { .. } => {
+                self.errors
+                    .push(LoweringError::EnumVariantAccess { span: span.clone() });
+                None
             }
 
             Op::StructCreate {
@@ -514,7 +529,11 @@ impl<'a> AstLowering<'a> {
                 self.lower_array_create(builder, args, ty, span)
             }
             Op::BracketOpen { .. } => {
-                todo!("lower bracket open, is this not fn call, what is this? in RVSDG")
+                self.errors.push(LoweringError::UnexpectedExpression {
+                    description: "BracketOpen should not appear in RVSDG lowering".to_string(),
+                    span: span.clone(),
+                });
+                None
             }
         }
     }
@@ -1006,7 +1025,8 @@ impl<'a> AstLowering<'a> {
                 let index_val = self.lower_expr(builder, index)?;
                 let (elem_size, _) = builder
                     .struct_layout_info
-                    .size_and_align_of_type(inner_type_id);
+                    .size_and_align_of_type(inner_type_id)
+                    .ok()?;
                 let u64_type = self.types.uint_type;
                 let zeroed_span = Span { start: 0, end: 0 };
                 let elem_size_val =
@@ -1022,7 +1042,9 @@ impl<'a> AstLowering<'a> {
                 Some((ptr, inner_type_id))
             }
             LvalueKind::FieldAccess { .. } => {
-                todo!("struct field lvalue pointer")
+                self.errors
+                    .push(LoweringError::StructFieldLvalue { span: span.clone() });
+                None
             }
         }
     }
@@ -1053,7 +1075,8 @@ impl<'a> AstLowering<'a> {
         };
         let (size, _) = builder
             .struct_layout_info
-            .size_and_align_of_type(*inner_type_id);
+            .size_and_align_of_type(*inner_type_id)
+            .ok()?;
         let type_size = builder.const_u64(size as u64, self.types.uint_type, span.clone());
         let offset = builder.binary(BinaryOp::Mul, index_val, type_size, result_ty, span.clone());
         let ptr = builder.binary(BinaryOp::Add, array_val, offset, result_ty, span.clone());
@@ -1097,7 +1120,8 @@ impl<'a> AstLowering<'a> {
             //     builder.const_u64(todo!("get size from type id"), u64_type_id, zeroed_span);
             let (size, _) = builder
                 .struct_layout_info
-                .size_and_align_of_type(*inner_type_id);
+                .size_and_align_of_type(*inner_type_id)
+                .ok()?;
             let inner_type_size = builder.const_u64(size as u64, u64_type_id, zeroed_span.clone());
             let offset_index = builder.const_u64(i as u64, u64_type_id, zeroed_span.clone());
             let offset_size = builder.binary(

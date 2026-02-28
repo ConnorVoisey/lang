@@ -94,7 +94,13 @@ impl Ast {
                         ..
                     }) => {
                         self.next_token();
-                        let (var_type, span) = self.parse_var_type();
+                        let (var_type, span) = match self.parse_var_type() {
+                            Ok(val) => val,
+                            Err(e) => {
+                                self.errs.push(AstParseError::TypeParse(e));
+                                return;
+                            }
+                        };
                         variants.push((ident_id, span.start, var_type));
                         match self.peek_token() {
                             Some(Token {
@@ -110,9 +116,15 @@ impl Ast {
                                     self.next_token();
                                 }
                             }
-                            t => {
-                                dbg!(t);
-                                panic!()
+                            Some(t) => {
+                                self.errs.push(AstParseError::EnumExpectedClosingBracket {
+                                    token: t.clone(),
+                                });
+                                return;
+                            }
+                            None => {
+                                self.errs.push(AstParseError::UnexpectedEndOfInput);
+                                return;
                             }
                         }
                     }
@@ -123,15 +135,23 @@ impl Ast {
                         variants.push((ident_id, self.curr_token_i(), VarType::Void));
                         break;
                     }
-                    t => {
-                        dbg!(t);
-                        todo!();
+                    Some(t) => {
+                        self.errs
+                            .push(AstParseError::EnumUnexpectedTokenAfterVariant {
+                                token: t.clone(),
+                            });
+                        return;
+                    }
+                    None => {
+                        self.errs.push(AstParseError::UnexpectedEndOfInput);
+                        return;
                     }
                 },
                 TokenKind::CurlyBracketClose => break,
-                t => {
-                    dbg!(t);
-                    todo!();
+                _ => {
+                    let token = self.tokens[self.curr_token_i()].clone();
+                    self.errs.push(AstParseError::EnumUnexpectedToken { token });
+                    return;
                 }
             }
         }

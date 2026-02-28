@@ -103,7 +103,13 @@ impl Ast {
                 ..
             })
         ) {
-            todo!("handle error, array access not closed")
+            let token = self.curr_token().cloned().unwrap_or_else(|| Token {
+                kind: TokenKind::SquareBracketClose,
+                span: Span { start: 0, end: 0 },
+            });
+            self.errs
+                .push(AstParseError::ExpectedClosingSquareBracket { token });
+            return None;
         }
         self.next_token();
         Some(AstExpr {

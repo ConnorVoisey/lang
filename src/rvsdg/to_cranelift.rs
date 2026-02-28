@@ -31,7 +31,7 @@ fn type_to_cl(types: &TypeArena, type_id: TypeId) -> Option<types::Type> {
         TypeKind::Bool => Some(types::I8),
         TypeKind::CStr => Some(types::I64),
         TypeKind::Array { .. } => Some(types::I64),
-        TypeKind::Enum(_) => todo!(),
+        TypeKind::Enum(_) => None,
         TypeKind::Ref(_) => Some(types::I64),
         TypeKind::Str => unreachable!(
             "Str should be lowered into the respected fields that are accessed before going to cranelift."

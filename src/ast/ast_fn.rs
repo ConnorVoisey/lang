@@ -84,7 +84,13 @@ impl Ast {
 
         // TODO: parse fn body, call fn self.parse_block or self.parse_fn_body
         let args = self.parse_fn_args(symbols);
-        let (return_type, return_type_span) = self.parse_var_type();
+        let (return_type, return_type_span) = match self.parse_var_type() {
+            Ok(v) => v,
+            Err(e) => {
+                self.errs.push(AstParseError::TypeParse(e));
+                return None;
+            }
+        };
 
         let fn_name_span = self.tokens[start_token_i + 1].span.clone();
         let full_signature_span = Span {
@@ -133,7 +139,13 @@ impl Ast {
                 }) => {
                     let ident_id = *id;
                     let ident_span = ident_span.clone();
-                    let (var_type, type_span) = self.parse_var_type();
+                    let (var_type, type_span) = match self.parse_var_type() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            self.errs.push(AstParseError::TypeParse(e));
+                            return args;
+                        }
+                    };
                     args.push(AstFnArg {
                         ident_id,
                         symbol_id: symbols.declare(

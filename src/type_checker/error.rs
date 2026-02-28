@@ -104,6 +104,27 @@ pub enum TypeCheckingError {
         got_type_str: String,
         index_span: Span,
     },
+
+    #[error("Internal compiler error: {message}")]
+    InternalError { message: String, span: Span },
+
+    #[error("Expected field name for `.` access, got expression")]
+    DotAccessExpectedIdent { expr_span: Span },
+
+    #[error("Expected variant name for `::` access, got expression")]
+    DoubleColonExpectedIdent { expr_span: Span },
+
+    #[error("Cannot index into non-array type {got_type_str}")]
+    IndexNonArray {
+        got_type_str: String,
+        lhs_span: Span,
+    },
+
+    #[error("Array index must be an integer type, got {got_type_str}")]
+    ArrayAccessIndexNotInteger {
+        got_type_str: String,
+        index_span: Span,
+    },
 }
 
 impl ToDiagnostic for TypeCheckingError {
@@ -271,6 +292,49 @@ impl ToDiagnostic for TypeCheckingError {
                 .with_labels(vec![
                     Label::primary(file_id, index_span.start..index_span.end)
                         .with_message("index must be an integer"),
+                ])
+                .with_notes(vec![String::from("Array indices must be Int or Uint.")]),
+            TypeCheckingError::InternalError { span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, span.start..span.end)
+                        .with_message("internal compiler error near here"),
+                ])
+                .with_notes(vec![String::from(
+                    "This is a compiler bug. Please report it.",
+                )]),
+            TypeCheckingError::DotAccessExpectedIdent { expr_span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, expr_span.start..expr_span.end)
+                        .with_message("expected field name here"),
+                ])
+                .with_notes(vec![String::from(
+                    "The right-hand side of `.` must be a field name, e.g. `foo.bar`.",
+                )]),
+            TypeCheckingError::DoubleColonExpectedIdent { expr_span } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, expr_span.start..expr_span.end)
+                        .with_message("expected variant name here"),
+                ])
+                .with_notes(vec![String::from(
+                    "The right-hand side of `::` must be a variant name, e.g. `MyEnum::Variant`.",
+                )]),
+            TypeCheckingError::IndexNonArray { lhs_span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, lhs_span.start..lhs_span.end)
+                        .with_message("this is not an array"),
+                ])
+                .with_notes(vec![String::from(
+                    "Only arrays can be indexed with `[]` syntax.",
+                )]),
+            TypeCheckingError::ArrayAccessIndexNotInteger { index_span, .. } => Diagnostic::error()
+                .with_message(self.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, index_span.start..index_span.end)
+                        .with_message("index must be an integer type"),
                 ])
                 .with_notes(vec![String::from("Array indices must be Int or Uint.")]),
         }

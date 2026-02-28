@@ -2,6 +2,7 @@ use crate::{
     ast::{
         Ast,
         ast_expr::{AstExpr, ExprKind, Op},
+        error::AstParseError,
     },
     lexer::{Span, Token, TokenKind},
     symbols::SymbolTable,
@@ -60,9 +61,16 @@ impl Ast {
                             self.next_token();
                         }
                     }
-                    _t => {
-                        dbg!(self.curr_token(), self.peek_token(),);
-                        todo!();
+                    Some(t) => {
+                        let cloned_token = t.clone();
+                        self.errs.push(AstParseError::StructCreateExpectedColon {
+                            token: cloned_token,
+                        });
+                        return None;
+                    }
+                    None => {
+                        self.errs.push(AstParseError::UnexpectedEndOfInput);
+                        return None;
                     }
                 }
             }

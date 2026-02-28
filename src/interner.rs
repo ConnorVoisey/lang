@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub type SharedInterner = Arc<RwLock<Interner>>;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct IdentId(pub(crate) usize);
+pub struct IdentId(pub usize);
 
 #[derive(Debug)]
 pub struct Interner {

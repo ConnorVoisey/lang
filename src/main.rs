@@ -49,9 +49,9 @@ fn main() -> color_eyre::Result<()> {
                 }
             };
         }
-        t => {
-            dbg!(t);
-            todo!("handle other command cases");
+        lang::cli::Commands::Check { path: _ } => {
+            eprintln!("The `check` command is not yet implemented.");
+            std::process::exit(1);
         }
     }
 

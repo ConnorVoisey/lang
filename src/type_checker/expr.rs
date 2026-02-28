@@ -1,6 +1,7 @@
 use crate::{
     ast::ast_expr::{AstExpr, Atom, ExprKind, Op},
     interner::IdentId,
+    lexer::Span,
     symbols::{SymbolId, SymbolKind},
     type_checker::{TypeChecker, error::TypeCheckingError},
     types::{TypeId, TypeKind},
@@ -18,7 +19,7 @@ impl<'a> TypeChecker<'a> {
     ) -> Option<TypeId> {
         match &mut expr.kind {
             ExprKind::Atom(atom) => {
-                expr.type_id = Some(self.check_atom(atom));
+                expr.type_id = self.check_atom(atom, &expr.span);
                 expr.type_id
             }
             ExprKind::Op(op) => {
@@ -325,9 +326,10 @@ impl<'a> TypeChecker<'a> {
                                 found_field.map(|f| f.1)
                             }
                             _ => {
-                                todo!(
-                                    "could not find field in this struct with this ident, add error handling herre"
-                                )
+                                self.errors.push(TypeCheckingError::DotAccessExpectedIdent {
+                                    expr_span: right.span.clone(),
+                                });
+                                return None;
                             }
                         };
                         expr.type_id = type_id;
@@ -356,9 +358,11 @@ impl<'a> TypeChecker<'a> {
                                 found_field.map(|f| f.1)
                             }
                             _ => {
-                                todo!(
-                                    "could not find field in this struct with this ident, add error handling herre"
-                                )
+                                self.errors
+                                    .push(TypeCheckingError::DoubleColonExpectedIdent {
+                                        expr_span: right.span.clone(),
+                                    });
+                                return None;
                             }
                         };
                         expr.type_id = type_id;
@@ -383,8 +387,13 @@ impl<'a> TypeChecker<'a> {
                                 size: _,
                                 inner_type,
                             } => Some(*inner_type),
-                            // TODO: add error here
-                            _ => None,
+                            _ => {
+                                self.errors.push(TypeCheckingError::IndexNonArray {
+                                    got_type_str: self.arena.id_to_string(left_ty_id),
+                                    lhs_span: left.span.clone(),
+                                });
+                                return None;
+                            }
                         };
 
                         // right must be an integer
@@ -397,7 +406,14 @@ impl<'a> TypeChecker<'a> {
                             | TypeKind::U8
                             | TypeKind::U32
                             | TypeKind::U64 => (),
-                            t => todo!("{:?} is not valid for array access", t),
+                            _ => {
+                                self.errors
+                                    .push(TypeCheckingError::ArrayAccessIndexNotInteger {
+                                        got_type_str: self.arena.id_to_string(right_ty_id),
+                                        index_span: right.span.clone(),
+                                    });
+                                return None;
+                            }
                         }
 
                         expr.type_id = inner_type;
@@ -439,7 +455,13 @@ impl<'a> TypeChecker<'a> {
                             expr.type_id
                         }
                     }
-                    Op::BracketOpen { left: _, right: _ } => todo!(),
+                    Op::BracketOpen { .. } => {
+                        self.errors.push(TypeCheckingError::InternalError {
+                            message: "Op::BracketOpen should not reach type checking".to_string(),
+                            span: expr.span.clone(),
+                        });
+                        return None;
+                    }
                     Op::StructCreate {
                         ident,
                         args,
@@ -559,22 +581,33 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn check_atom(&mut self, atom: &Atom) -> TypeId {
+    fn check_atom(&mut self, atom: &Atom, span: &Span) -> Option<TypeId> {
         match atom {
-            Atom::Int(val) => self.arena.make(TypeKind::IntLiteral(*val)),
-            Atom::Bool(_) => self.arena.bool_type,
-            Atom::Str(_) => self.arena.str_type,
-            Atom::CStr(_) => self.arena.cstr_type,
+            Atom::Int(val) => Some(self.arena.make(TypeKind::IntLiteral(*val))),
+            Atom::Bool(_) => Some(self.arena.bool_type),
+            Atom::Str(_) => Some(self.arena.str_type),
+            Atom::CStr(_) => Some(self.arena.cstr_type),
             Atom::Ident((_, symbol_id)) => {
-                let sym = self.symbols.resolve(symbol_id.unwrap_or_else(|| {
-                    panic!("symbol should have been resolved for atom: {:?}", atom)
-                }));
+                let symbol_id = match symbol_id {
+                    Some(id) => *id,
+                    None => {
+                        self.errors.push(TypeCheckingError::InternalError {
+                            message: "symbol was not resolved during symbol registration"
+                                .to_string(),
+                            span: span.clone(),
+                        });
+                        return None;
+                    }
+                };
+                let sym = self.symbols.resolve(symbol_id);
                 match &sym.kind {
-                    SymbolKind::Fn(data) => data.fn_type_id.unwrap(),
-                    SymbolKind::Var(data) => data.type_id.unwrap(),
-                    SymbolKind::Struct(data) => self.arena.intern_struct_symbol(data.struct_id),
-                    SymbolKind::Enum(data) => self.arena.intern_enum_symbol(data.enum_id),
-                    SymbolKind::FnArg(data) => data.type_id.unwrap(),
+                    SymbolKind::Fn(data) => data.fn_type_id,
+                    SymbolKind::Var(data) => data.type_id,
+                    SymbolKind::Struct(data) => {
+                        Some(self.arena.intern_struct_symbol(data.struct_id))
+                    }
+                    SymbolKind::Enum(data) => Some(self.arena.intern_enum_symbol(data.enum_id)),
+                    SymbolKind::FnArg(data) => data.type_id,
                 }
             }
         }

@@ -122,6 +122,15 @@ impl SymbolTable {
     pub fn resolve(&self, symbol_id: SymbolId) -> &Symbol {
         &self.symbols[symbol_id.0]
     }
+
+    pub fn get_struct_span(&self, struct_id: StructId) -> Option<Span> {
+        self.symbols.iter().find_map(|sym| match &sym.kind {
+            SymbolKind::Struct(data) if data.struct_id == struct_id => {
+                Some(data.full_def_span.clone())
+            }
+            _ => None,
+        })
+    }
     pub fn resolve_mut(&mut self, symbol_id: SymbolId) -> &mut Symbol {
         &mut self.symbols[symbol_id.0]
     }
@@ -231,7 +240,7 @@ impl SymbolTable {
         &mut self,
         types: &mut TypeArena,
         func: &mut AstFunc,
-        _errors: &mut Vec<SymbolError>,
+        errors: &mut Vec<SymbolError>,
     ) {
         // We will not hold a long-lived mutable borrow to `self` while we call lookup/resolve.
         // First, ensure the symbol exists and is a function (immutable borrow).
@@ -252,13 +261,25 @@ impl SymbolTable {
                     Some(symbol_id) => {
                         let symbol = self.resolve(*symbol_id);
                         match &symbol.kind {
-                            SymbolKind::Fn(_) => todo!(),
-                            SymbolKind::FnArg(_) => todo!(),
-                            SymbolKind::Var(_) => todo!(),
+                            SymbolKind::Fn(_) | SymbolKind::FnArg(_) | SymbolKind::Var(_) => {
+                                let name = self.interner.read().resolve(*ident_id).to_string();
+                                let kind_str = match &symbol.kind {
+                                    SymbolKind::Fn(_) => "Function",
+                                    SymbolKind::FnArg(_) => "Function argument",
+                                    SymbolKind::Var(_) => "Variable",
+                                    _ => unreachable!(),
+                                };
+                                errors.push(SymbolError::NotAType {
+                                    name,
+                                    symbol_kind: kind_str.to_string(),
+                                    span: func.return_type_span.clone(),
+                                });
+                                TypeKind::Unknown
+                            }
                             SymbolKind::Struct(struct_symbol) => {
                                 TypeKind::Struct(struct_symbol.struct_id)
                             }
-                            SymbolKind::Enum(_) => todo!(),
+                            SymbolKind::Enum(enum_data) => TypeKind::Enum(enum_data.enum_id),
                         }
                     }
                     None => match self.interner.read().resolve(*ident_id) {
@@ -446,7 +467,7 @@ trait ToTypeKind {
 impl ToTypeKind for VarType {
     fn to_type_kind(&self, types: &mut TypeArena, symbols: &SymbolTable) -> TypeKind {
         match &self {
-            VarType::Void => todo!(),
+            VarType::Void => TypeKind::Void,
             VarType::IntLiteral(val) => TypeKind::IntLiteral(*val),
             VarType::Bool => TypeKind::Bool,
             VarType::U32 => TypeKind::U32,
@@ -455,20 +476,20 @@ impl ToTypeKind for VarType {
             VarType::U8 => TypeKind::U8,
             VarType::Str => TypeKind::Str,
             VarType::CStr => TypeKind::CStr,
-            VarType::CChar => todo!(),
+            VarType::CChar => TypeKind::Unknown,
             VarType::Custom((_, symbol_id_opt)) => {
                 let symbol_id = match symbol_id_opt {
                     Some(symbol_id) => symbol_id,
-                    None => todo!("Get type kind for var type where symbol is none"),
+                    None => return TypeKind::Unknown,
                 };
                 match &symbols.resolve(*symbol_id).kind {
-                    SymbolKind::Fn(fn_symbol_data) => todo!(),
-                    SymbolKind::FnArg(fn_arg_symbol_data) => todo!(),
-                    SymbolKind::Var(var_symbol_data) => todo!(),
+                    SymbolKind::Fn(_) | SymbolKind::FnArg(_) | SymbolKind::Var(_) => {
+                        TypeKind::Unknown
+                    }
                     SymbolKind::Struct(struct_symbol_data) => {
                         TypeKind::Struct(struct_symbol_data.struct_id)
                     }
-                    SymbolKind::Enum(enum_symbol_data) => todo!(),
+                    SymbolKind::Enum(enum_data) => TypeKind::Enum(enum_data.enum_id),
                 }
             }
             VarType::Ref(var_type) => TypeKind::Ref(types.var_type_to_typeid(var_type, symbols)),

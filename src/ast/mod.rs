@@ -1,5 +1,10 @@
 use crate::{
-    ast::{ast_enum::AstEnum, ast_fn::AstFunc, ast_struct::AstStruct, error::AstParseError},
+    ast::{
+        ast_enum::AstEnum,
+        ast_fn::AstFunc,
+        ast_struct::AstStruct,
+        error::{AstParseError, TypeParseError},
+    },
     error::CompliationError,
     interner::{IdentId, SharedInterner},
     lexer::{Span, Token, TokenKind},
@@ -62,9 +67,6 @@ impl Ast {
 
     fn peek_token(&self) -> Option<&Token> {
         self.tokens.get(self.next_token_i)
-    }
-    fn peek_n_token(&self, amount: usize) -> Option<&Token> {
-        self.tokens.get(self.next_token_i + amount - 1)
     }
     fn skip_past_semi(&mut self) {
         while let Some(token) = self.next_token() {
@@ -136,9 +138,15 @@ impl Ast {
                             kind: TokenKind::SemiColon,
                             ..
                         }) => (),
-                        t => {
-                            dbg!(t);
-                            panic!("Expected `;` after extern c func def");
+                        Some(t) => {
+                            let cloned_token = t.clone();
+                            self.errs.push(AstParseError::ExternFnExpectedSemiColon {
+                                token: cloned_token,
+                            });
+                        }
+                        None => {
+                            self.errs.push(AstParseError::UnexpectedEndOfInput);
+                            return;
                         }
                     }
                     if let Some(func) = fn_dec {
@@ -157,14 +165,27 @@ impl Ast {
         }
     }
 
-    fn parse_var_type(&mut self) -> (VarType, Span) {
+    fn parse_var_type(&mut self) -> Result<(VarType, Span), TypeParseError> {
         match self.next_token() {
             Some(Token {
                 kind: TokenKind::SquareBracketOpen,
                 span,
             }) => {
                 let span_cloned = span.clone();
-                let (inner_type, inner_span) = self.parse_var_type();
+                let (inner_type, inner_span) = self.parse_var_type()?;
+
+                match self.peek_token() {
+                    Some(Token {
+                        kind: TokenKind::SemiColon,
+                        ..
+                    }) => self.peek_token(),
+                    Some(token) => {
+                        return Err(TypeParseError::ArrayExpectedSemiColonAfterType {
+                            token: token.clone(),
+                        });
+                    }
+                    None => return Err(TypeParseError::UnexpectedEndOfInput),
+                };
 
                 if let Some(Token {
                     kind: TokenKind::SemiColon,
@@ -172,29 +193,35 @@ impl Ast {
                 }) = self.peek_token()
                 {
                 } else {
-                    todo!("add diagnostics, expected semi colon after [expr")
                 }
                 self.next_token();
 
-                let count = if let Some(Token {
-                    kind: TokenKind::Int(int_val),
-                    ..
-                }) = self.next_token()
-                {
-                    int_val.clone()
-                } else {
-                    todo!("add diagnostics, expected int after [I32;")
+                let count = match self.next_token() {
+                    Some(Token {
+                        kind: TokenKind::Int(int_val),
+                        ..
+                    }) => int_val.clone(),
+                    Some(token) => {
+                        return Err(TypeParseError::ArrayExpectedIntAfterType {
+                            token: token.clone(),
+                        });
+                    }
+                    None => return Err(TypeParseError::UnexpectedEndOfInput),
                 };
 
-                if let Some(Token {
-                    kind: TokenKind::SquareBracketClose,
-                    ..
-                }) = self.next_token()
-                {
-                } else {
-                    todo!("add diagnostics, expected ] after [I32; 5")
+                match self.next_token() {
+                    Some(Token {
+                        kind: TokenKind::SquareBracketClose,
+                        ..
+                    }) => (),
+                    Some(token) => {
+                        return Err(TypeParseError::ArrayExpectedClose {
+                            token: token.clone(),
+                        });
+                    }
+                    None => return Err(TypeParseError::UnexpectedEndOfInput),
                 };
-                (
+                Ok((
                     VarType::Array {
                         var_type: Box::new(inner_type),
                         count: count as usize,
@@ -203,21 +230,21 @@ impl Ast {
                         start: span_cloned.start,
                         end: inner_span.end,
                     },
-                )
+                ))
             }
             Some(Token {
                 kind: TokenKind::Amp,
                 span,
             }) => {
                 let span_cloned = span.clone();
-                let (inner_type, inner_span) = self.parse_var_type();
-                (
+                let (inner_type, inner_span) = self.parse_var_type()?;
+                Ok((
                     VarType::Ref(Box::new(inner_type)),
                     Span {
                         start: span_cloned.start,
                         end: inner_span.end,
                     },
-                )
+                ))
             }
             Some(Token {
                 kind: TokenKind::Ident(ident_id),
@@ -236,13 +263,10 @@ impl Ast {
                     "Bool" => VarType::Bool,
                     _ => VarType::Custom((ident_cloned_2, None)),
                 };
-                (var_type, span_cloned)
+                Ok((var_type, span_cloned))
             }
-            Some(t) => {
-                dbg!(t);
-                todo!()
-            }
-            None => todo!(),
+            Some(t) => return Err(TypeParseError::NotTypeToken { token: t.clone() }),
+            None => return Err(TypeParseError::UnexpectedEndOfInput),
         }
     }
 

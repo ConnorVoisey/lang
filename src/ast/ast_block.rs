@@ -204,9 +204,16 @@ impl Ast {
                         kind: TokenKind::Ident(ident_id),
                         span,
                     }) => (*ident_id, span.clone()),
-                    t => {
-                        dbg!(t);
-                        todo!();
+                    Some(t) => {
+                        let cloned_token = t.clone();
+                        self.errs.push(AstParseError::LetExpectedIdent {
+                            token: cloned_token,
+                        });
+                        return None;
+                    }
+                    None => {
+                        self.errs.push(AstParseError::UnexpectedEndOfInput);
+                        return None;
                     }
                 };
                 let symbol_id = symbols.declare(

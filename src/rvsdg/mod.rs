@@ -599,17 +599,13 @@ impl Function {
     /// Get a region by ID
     #[inline]
     pub fn region(&self, id: RegionId) -> &Region {
-        self.regions
-            .get(id.0)
-            .unwrap_or_else(|| panic!("Invalid RegionId({}) in function", id.0))
+        &self.regions[id.0]
     }
 
     /// Get a mutable region by ID
     #[inline]
     pub fn region_mut(&mut self, id: RegionId) -> &mut Region {
-        self.regions
-            .get_mut(id.0)
-            .unwrap_or_else(|| panic!("Invalid RegionId({}) in function", id.0))
+        &mut self.regions[id.0]
     }
 }
 

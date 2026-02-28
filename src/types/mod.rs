@@ -357,13 +357,9 @@ impl TypeArena {
                 Some(symbol_id) => {
                     let symbol = symbols.resolve(*symbol_id);
                     match &symbol.kind {
-                        SymbolKind::Fn(_) => TypeKind::Fn {
-                            params: todo!(),
-                            param_symbols: todo!(),
-                            ret: todo!(),
-                        },
-                        SymbolKind::FnArg(_) => todo!(),
-                        SymbolKind::Var(_) => todo!(),
+                        SymbolKind::Fn(_) | SymbolKind::FnArg(_) | SymbolKind::Var(_) => {
+                            TypeKind::Unknown
+                        }
                         SymbolKind::Struct(struct_data) => TypeKind::Struct(struct_data.struct_id),
                         SymbolKind::Enum(enum_data) => TypeKind::Enum(enum_data.enum_id),
                     }
@@ -374,7 +370,7 @@ impl TypeArena {
                 size: *count,
                 inner_type: self.var_type_to_typeid(&var_type, symbols),
             },
-            VarType::CChar => todo!(),
+            VarType::CChar => TypeKind::Unknown,
         }
     }
     pub fn var_type_to_typeid(&mut self, v: &VarType, symbols: &SymbolTable) -> TypeId {

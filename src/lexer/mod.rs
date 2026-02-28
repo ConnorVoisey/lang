@@ -473,7 +473,6 @@ mod test {
         let interner = Interner::new();
         let shared_interner = SharedInterner::new(RwLock::new(interner));
         let tokens = Lexer::from_src_str(&src, &shared_interner).unwrap().tokens;
-        let mut i = shared_interner.write();
         assert_eq!(
             tokens
                 .iter()

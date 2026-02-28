@@ -1,3 +1,6 @@
+use crate::rvsdg::lower::error::LoweringError;
+use crate::struct_layout::error::StructLayoutError;
+use crate::symbols::error::SymbolError;
 use crate::type_checker::error::TypeCheckingError;
 use crate::{ast::error::AstParseError, lexer::error::LexerError};
 use codespan_reporting::diagnostic::Diagnostic;
@@ -17,8 +20,20 @@ pub enum CompliationError {
     #[error("Ast parsing error")]
     AstParseError(Vec<AstParseError>),
 
+    #[error("Symbol resolution error")]
+    SymbolError(Vec<SymbolError>),
+
     #[error("Type Checking error")]
     TypeCheckingError(Vec<TypeCheckingError>),
+
+    #[error("Struct layout error")]
+    StructLayoutError(Vec<StructLayoutError>),
+
+    #[error("RVSDG lowering error")]
+    LoweringError(Vec<LoweringError>),
+
+    #[error("Linking failed")]
+    LinkingError(String),
 
     #[error("unknown data store error")]
     Unknown,
@@ -41,10 +56,19 @@ impl CompliationError {
             CompliationError::AstParseError(errs) => {
                 errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
             }
+            CompliationError::SymbolError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
+            }
             CompliationError::TypeCheckingError(errs) => {
                 errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
             }
-            CompliationError::Unknown => vec![],
+            CompliationError::StructLayoutError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
+            }
+            CompliationError::LoweringError(errs) => {
+                errs.iter().map(|e| e.to_diagnostic(file_id)).collect()
+            }
+            CompliationError::LinkingError(_) | CompliationError::Unknown => vec![],
         };
 
         let writer = StandardStream::stderr(ColorChoice::Always);

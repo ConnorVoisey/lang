@@ -1,11 +1,16 @@
 use crate::{
     interner::IdentId,
-    struct_layout::dfs::{StructWithChild, TopologicalSortResult, topological_sort_rev},
+    struct_layout::{
+        dfs::{StructWithChild, TopologicalSortResult, topological_sort_rev},
+        error::StructLayoutError,
+    },
+    symbols::SymbolTable,
     types::{StructId, TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashSet;
 
 pub mod dfs;
+pub mod error;
 
 #[derive(Debug, Clone)]
 pub struct StructField {
@@ -27,17 +32,19 @@ pub struct StructLayout {
 pub struct StructLayoutInfo<'a> {
     pub layouts: Vec<Option<StructLayout>>,
     pub types: &'a TypeArena,
+    pub symbols: &'a SymbolTable,
 }
 
 impl<'a> StructLayoutInfo<'a> {
-    pub fn new(types: &'a TypeArena) -> Self {
+    pub fn new(types: &'a TypeArena, symbols: &'a SymbolTable) -> Self {
         Self {
             layouts: vec![],
             types,
+            symbols,
         }
     }
 
-    pub fn compute_struct_layout(&mut self) -> Vec<StructLayout> {
+    pub fn compute_struct_layout(&mut self) -> Result<Vec<StructLayout>, Vec<StructLayoutError>> {
         // We need to get the childs of all the structs, so if a struct is used directly (not by
         // reference) than it is a parent of that struct
         let struct_iter = self.types.kinds.iter().filter_map(|t| match t {
@@ -64,10 +71,17 @@ impl<'a> StructLayoutInfo<'a> {
             TopologicalSortResult::Success(struct_ids) => struct_ids,
             TopologicalSortResult::Cycle {
                 sorted: _,
-                cycle_nodes: _,
-            } => todo!("handled cyclic struct diagnostics"),
+                cycle_nodes,
+            } => {
+                let struct_spans: Vec<_> = cycle_nodes
+                    .iter()
+                    .filter_map(|struct_id| self.symbols.get_struct_span(*struct_id))
+                    .collect();
+                return Err(vec![StructLayoutError::CyclicDependency { struct_spans }]);
+            }
         };
 
+        let mut errors = vec![];
         for struct_id in sorted_struct_ids.iter() {
             let s_type_id = self.types.struct_symbol_to_type[struct_id.0].unwrap();
             let struct_id = match self.types.kind(s_type_id) {
@@ -75,21 +89,27 @@ impl<'a> StructLayoutInfo<'a> {
                 _ => unreachable!("struct symbol should have a type of struct"),
             };
 
-            self.compute_layout(struct_id);
+            if let Err(err) = self.compute_layout(struct_id) {
+                errors.push(err);
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         // TODO: remove this clone, consider if this needs to be an option to begin with
-        self.layouts.iter().filter_map(|s| s.clone()).collect()
+        Ok(self.layouts.iter().filter_map(|s| s.clone()).collect())
     }
 
-    pub fn compute_layout(&mut self, struct_id: StructId) {
+    pub fn compute_layout(&mut self, struct_id: StructId) -> Result<(), StructLayoutError> {
         let field_types = self.types.get_struct_fields(struct_id);
         let mut fields = Vec::with_capacity(field_types.len());
         let mut offset = 0;
         let mut struct_alignment = 1;
 
         for (field_ident_id, field_type_id) in field_types.iter() {
-            let (field_size, field_align) = self.size_and_align_of_type(*field_type_id);
+            let (field_size, field_align) = self.size_and_align_of_type(*field_type_id)?;
             struct_alignment = struct_alignment.max(field_align);
             offset = align_to(offset, field_align);
 
@@ -112,50 +132,58 @@ impl<'a> StructLayoutInfo<'a> {
             fields,
             child_struct_ids: FxHashSet::default(),
         });
+        Ok(())
     }
 
-    pub fn size_and_align_of_type(&self, type_id: TypeId) -> (usize, usize) {
+    pub fn size_and_align_of_type(
+        &self,
+        type_id: TypeId,
+    ) -> Result<(usize, usize), StructLayoutError> {
         use crate::types::TypeKind;
 
         let type_kind = self.types.kind(type_id);
         match type_kind {
-            TypeKind::IntLiteral(_) | TypeKind::I32 | TypeKind::U32 => (4, 4),
-            TypeKind::U8 => (1, 1),
-            TypeKind::U64 => (8, 8),
-            TypeKind::Bool => (1, 1),
-            TypeKind::Void => (0, 1),
-            TypeKind::CStr => (8, 8),
-            TypeKind::Str => (16, 8),
-            TypeKind::Ref(_) => (8, 8),
+            TypeKind::IntLiteral(_) | TypeKind::I32 | TypeKind::U32 => Ok((4, 4)),
+            TypeKind::U8 => Ok((1, 1)),
+            TypeKind::U64 => Ok((8, 8)),
+            TypeKind::Bool => Ok((1, 1)),
+            TypeKind::Void => Ok((0, 1)),
+            TypeKind::CStr => Ok((8, 8)),
+            TypeKind::Str => Ok((16, 8)),
+            TypeKind::Ref(_) => Ok((8, 8)),
             TypeKind::Struct(struct_id) => {
-                let layout = self
-                    .get(*struct_id)
-                    .expect("Struct layout must be computed bef=> unreachable!(), use, should have been covered in topological sort");
-                (layout.size, layout.alignment)
+                let layout = self.get(*struct_id).ok_or_else(|| {
+                    StructLayoutError::InternalError {
+                        description: format!(
+                            "Struct layout for StructId({}) was not computed before use",
+                            struct_id.0
+                        ),
+                    }
+                })?;
+                Ok((layout.size, layout.alignment))
             }
             TypeKind::Enum(_enum_id) => {
-                todo!("Handle enums inside of structs")
-                // let layout = self
-                //     .get(*enum_id)
-                //     .expect("Enum layout must be computed before use, should have been covered in topological sort");
-                // (layout.size, layout.alignment)
+                Err(StructLayoutError::InternalError {
+                    description: "Enum types as struct fields are not yet supported for layout computation".to_string(),
+                })
             }
-            TypeKind::Fn { .. } => (8, 8),
-            TypeKind::Unknown => {
-                panic!("Cannot compute size of Become - should be resolved by type checker")
+            TypeKind::Fn { .. } => Ok((8, 8)),
+            TypeKind::Unknown => Err(StructLayoutError::InternalError {
+                description: "Cannot compute size of Unknown type - should have been resolved by type checker".to_string(),
+            }),
+            TypeKind::Become => Err(StructLayoutError::InternalError {
+                description: "Cannot compute size of Become type - should have been resolved by type checker".to_string(),
+            }),
+            TypeKind::Var => Err(StructLayoutError::InternalError {
+                description: "Cannot compute size of Var type - should have been resolved by type checker".to_string(),
+            }),
+            TypeKind::State => Err(StructLayoutError::InternalError {
+                description: "Cannot compute size of State type - should not appear in struct layout".to_string(),
+            }),
+            TypeKind::Array { size, inner_type } => {
+                let (elem_size, elem_align) = self.size_and_align_of_type(*inner_type)?;
+                Ok((elem_size * size, elem_align))
             }
-            TypeKind::Become => {
-                panic!("Cannot compute size of Unknown - should be resolved by type checker")
-            }
-            TypeKind::Var => {
-                panic!("Cannot compute size of Var type - should be resolved by type checker")
-            }
-            TypeKind::State => {
-                panic!(
-                    "Cannot compute size of State - should be unreachable since this is only generated by RVSDG"
-                )
-            }
-            TypeKind::Array { .. } => todo!("implement struct sizing rules for array fields"),
         }
     }
 

@@ -92,7 +92,10 @@ impl ModParser {
 
         dbg!(&ast.extern_fns);
         let mut type_arena = TypeArena::new();
-        symbols.register_ast(&mut ast, &mut type_arena);
+        let symbol_errs = symbols.register_ast(&mut ast, &mut type_arena);
+        if !symbol_errs.is_empty() {
+            return Err(CompliationError::SymbolError(symbol_errs));
+        }
 
         {
             let _span = span!(Level::INFO, "type_checking").entered();
@@ -104,8 +107,10 @@ impl ModParser {
         }
 
         let struct_layouts = {
-            let mut struct_layouts = StructLayoutInfo::new(&type_arena);
-            struct_layouts.compute_struct_layout();
+            let mut struct_layouts = StructLayoutInfo::new(&type_arena, &symbols);
+            if let Err(errs) = struct_layouts.compute_struct_layout() {
+                return Err(CompliationError::StructLayoutError(errs));
+            }
             struct_layouts
         };
 
@@ -119,7 +124,10 @@ impl ModParser {
                 interner.clone(),
                 &struct_layouts,
             );
-            lowering.lower_module()
+            match lowering.lower_module() {
+                Ok(module) => module,
+                Err(errs) => return Err(CompliationError::LoweringError(errs)),
+            }
         };
 
         println!(
@@ -194,17 +202,19 @@ impl ModParser {
             match cc_comand.output() {
                 Ok(output) => {
                     if !output.status.success() {
-                        eprintln!("CC linking failed with status: {}", output.status);
-                        eprintln!("=== CC stdout ===");
-                        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-                        eprintln!("=== CC stderr ===");
-                        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-                        panic!();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        return Err(CompliationError::LinkingError(format!(
+                            "CC linking failed with status: {}\nstdout: {}\nstderr: {}",
+                            output.status, stdout, stderr
+                        )));
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to execute TCC: {}", e);
-                    return Err(CompliationError::LexingError(vec![e.into()]));
+                    return Err(CompliationError::LinkingError(format!(
+                        "Failed to execute CC linker: {}",
+                        e
+                    )));
                 }
             };
         }
