@@ -1,5 +1,10 @@
 use crate::{
-    ast::{Ast, ast_block::AstBlock, error::AstParseError},
+    ast::{
+        Ast,
+        ast_block::AstBlock,
+        ast_expr::match_expr::{MatchBranch, MatchOn},
+        error::AstParseError,
+    },
     interner::IdentId,
     lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolTable},
@@ -9,8 +14,10 @@ use crate::{
 pub mod array;
 pub mod debug;
 pub mod error;
+pub mod error;
 pub mod func;
 pub mod if_expr;
+pub mod match_expr;
 pub mod struct_create;
 
 #[derive(Debug)]
@@ -108,6 +115,10 @@ pub enum Op {
         ident: AstExpr,
         symbol_id: Option<SymbolId>,
         args: Vec<(IdentId, AstExpr)>,
+    },
+    Match {
+        on: AstExpr,
+        cases: Vec<MatchBranch>,
     },
 }
 

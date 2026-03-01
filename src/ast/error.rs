@@ -1,4 +1,5 @@
 use crate::{
+    ast::ast_expr::error::MatchParseError,
     error::ToDiagnostic,
     lexer::{Span, Token},
 };
@@ -27,6 +28,9 @@ pub enum AstParseError {
 
     #[error("{}", self.to_string())]
     TypeParse(TypeParseError),
+
+    #[error("{}", self.to_string())]
+    MatchParse(MatchParseError),
 
     #[error("Duplicate function name definitions: {name}")]
     FnDuplicateStructNames { token: Token, name: String },

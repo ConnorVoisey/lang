@@ -40,6 +40,7 @@ pub enum TokenKind {
     Equivalent,
     NotEquivalent,
     BinInverse,
+    FatArrow,
     Comma,
     Dot,
     Amp,
@@ -167,6 +168,17 @@ impl<'src> Lexer<'src> {
                                 end: i + 1,
                             },
                             kind: TokenKind::Equivalent,
+                        });
+                        continue;
+                    }
+                    Some(&(_, '>')) => {
+                        chars.next();
+                        lexer.tokens.push(Token {
+                            span: Span {
+                                start: i,
+                                end: i + 1,
+                            },
+                            kind: TokenKind::FatArrow,
                         });
                         continue;
                     }
@@ -423,6 +435,12 @@ mod test {
             fn test(ident Int, ident_underscore C_Char, c_char Str) Int {
                 let foo = c"test";
                 let bar = false != true;
+                let mapped = match bar {
+                    true => {
+                        20
+                    },
+                    false => 0,
+                };
             }"
             "#
         .to_string();
@@ -450,11 +468,13 @@ mod test {
                 TokenKind::BracketClose,
                 TokenKind::Ident(i.lookup_ident("Int")),
                 TokenKind::CurlyBracketOpen,
+                //
                 TokenKind::LetKeyWord,
                 TokenKind::Ident(i.lookup_ident("foo")),
                 TokenKind::Assign,
                 TokenKind::CStr(String::from("test")),
                 TokenKind::SemiColon,
+                //
                 TokenKind::LetKeyWord,
                 TokenKind::Ident(i.lookup_ident("bar")),
                 TokenKind::Assign,
@@ -462,6 +482,29 @@ mod test {
                 TokenKind::NotEquivalent,
                 TokenKind::TrueKeyWord,
                 TokenKind::SemiColon,
+                //
+                TokenKind::LetKeyWord,
+                TokenKind::Ident(i.lookup_ident("mapped")),
+                TokenKind::Assign,
+                TokenKind::MatchKeyWord,
+                TokenKind::Ident(i.lookup_ident("bar")),
+                TokenKind::CurlyBracketOpen,
+                //
+                TokenKind::TrueKeyWord,
+                TokenKind::FatArrow,
+                TokenKind::CurlyBracketOpen,
+                TokenKind::Int(20),
+                TokenKind::CurlyBracketClose,
+                TokenKind::Comma,
+                //
+                TokenKind::FalseKeyWord,
+                TokenKind::FatArrow,
+                TokenKind::Int(0),
+                TokenKind::Comma,
+                //
+                TokenKind::CurlyBracketClose,
+                TokenKind::SemiColon,
+                //
                 TokenKind::CurlyBracketClose,
             ]
         );

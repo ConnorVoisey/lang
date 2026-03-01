@@ -1,0 +1,31 @@
+// This is a WIP, will not compile yet
+import {
+}
+
+extern "C" {
+    fn puts(str &CStr) I32;
+    fn printf(fmt &CStr, param I32) I32;
+}
+
+enum HttpRes{
+    Success,
+    NotFound,
+    InternalServerError,
+}
+
+fn main() I32 {
+    let should_be_ok = divide(10, 2);
+    let should_be_err = divide(10, 0);
+
+    match should_be_ok {
+        Ok(v) => printf(&c"expected ok was ok, got: %d\n", v),
+        Err(e) => puts(e),
+    };
+    
+    match should_be_err {
+        Ok(v) => printf(&c"expected err was ok, got: %d\n", v),
+        Err(e) => puts(e),
+    };
+
+    0
+}
