@@ -1,10 +1,13 @@
 use crate::{
-    ast::ast_expr::{AstExpr, Atom, ExprKind, Op},
+    ast::ast_expr::{
+        AstExpr, Atom, ExprKind, Op,
+        match_expr::{MatchBranch, MatchOn},
+    },
     interner::IdentId,
     lexer::Span,
-    symbols::{SymbolId, SymbolKind},
+    symbols::{StructSymbolData, SymbolId, SymbolKind, VarSymbolData},
     type_checker::{TypeChecker, error::TypeCheckingError},
-    types::{TypeId, TypeKind},
+    types::{TypeArena, TypeId, TypeKind},
 };
 use rustc_hash::FxHashMap;
 use std::iter::once;
@@ -374,7 +377,6 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = type_id;
                         type_id
                     }
-
                     Op::ArrayAccess { left, right } => {
                         // left must be an array or array indexable thing (string),
                         // For now only allow arrays, string array access is ambiguous, is bytes or
@@ -576,9 +578,163 @@ impl<'a> TypeChecker<'a> {
                         expr.type_id = Some(struct_type_id);
                         Some(struct_type_id)
                     }
+                    Op::Match { on, cases } => {
+                        let type_id =
+                            match self.check_expr(on, return_type_id, fn_symbol_id, inside_loop) {
+                                Some(type_id) => type_id,
+                                None => {
+                                    todo!("match must be called on something that returns a type")
+                                }
+                            };
+
+                        let mut inner_expr_type_id: Option<Option<TypeId>> = None;
+                        for case in cases {
+                            self.check_match_on(case, type_id, on);
+                            // check the expr of the branch
+                            let case_expr_type_id = self.check_expr(
+                                &mut case.expr,
+                                return_type_id,
+                                fn_symbol_id,
+                                inside_loop,
+                            );
+                            match inner_expr_type_id {
+                                Some(inner_expr_type_id) => {
+                                    if inner_expr_type_id != case_expr_type_id {
+                                        todo!("match branches must return the same type")
+                                    }
+                                }
+                                None => inner_expr_type_id = Some(case_expr_type_id),
+                            };
+                            match case_expr_type_id {
+                                Some(case_type_id) => todo!(),
+                                None => todo!(),
+                            };
+                        }
+                        match inner_expr_type_id {
+                            Some(Some(type_id)) => Some(type_id),
+                            Some(None) => None,
+                            None => todo!("match must have at least one branch"),
+                        }
+                    }
                 }
             }
         }
+    }
+    fn check_match_on(&mut self, case: &mut MatchBranch, type_id: TypeId, on: &AstExpr) {
+        // check the on of the branch
+        #[inline]
+        fn check_on_case(
+            arena: &mut TypeArena,
+            errors: &mut Vec<TypeCheckingError>,
+            on_type: TypeId,
+            on_span: &Span,
+            expected_type: TypeId,
+            expected_span: &Span,
+        ) {
+            if arena.unify(on_type, expected_type).is_err() {
+                errors.push(TypeCheckingError::Mismatch {
+                    type_a_str: arena.id_to_string(on_type),
+                    type_a_span: on_span.clone(),
+                    type_b_str: arena.id_to_string(expected_type),
+                    type_b_span: expected_span.clone(),
+                });
+            }
+        }
+        match &mut case.on {
+            MatchOn::Int(int_val) => {
+                let on_type = self.arena.make(TypeKind::IntLiteral(*int_val));
+                check_on_case(
+                    self.arena,
+                    &mut self.errors,
+                    on_type,
+                    &case.on_span,
+                    type_id,
+                    &on.span,
+                );
+            }
+            MatchOn::Bool(_) => {
+                let on_type = self.arena.bool_type;
+                check_on_case(
+                    self.arena,
+                    &mut self.errors,
+                    on_type,
+                    &on.span,
+                    type_id,
+                    &case.on_span,
+                );
+            }
+            MatchOn::Str(_) => {
+                let on_type = self.arena.str_type;
+                check_on_case(
+                    self.arena,
+                    &mut self.errors,
+                    on_type,
+                    &on.span,
+                    type_id,
+                    &case.on_span,
+                );
+            }
+            MatchOn::Ident((ident_id, symbol_id)) => {
+                let new_symbol_id = self.symbols.declare(
+                    *ident_id,
+                    SymbolKind::Var(VarSymbolData {
+                        type_id: Some(type_id),
+                        is_used: false,
+                        is_mutable: false,
+                    }),
+                    case.on_span.clone(),
+                );
+                *symbol_id = Some(new_symbol_id);
+            }
+            MatchOn::Struct {
+                ident_id: _,
+                symbol_id,
+                args,
+                disgard_rest,
+            } => {
+                let struct_symbol = self
+                    .symbols
+                    .resolve(symbol_id.expect("struct symbol should have been resolved"));
+                match &struct_symbol.kind {
+                    SymbolKind::Struct(StructSymbolData {
+                        struct_id,
+                        full_def_span,
+                    }) => {
+                        todo!(
+                            "need to get the struct here, but I don't think structs have been processed yet"
+                        );
+                    }
+                    SymbolKind::Fn(fn_symbol_data) => todo!(),
+                    SymbolKind::FnArg(fn_arg_symbol_data) => todo!(),
+                    SymbolKind::Var(var_symbol_data) => todo!(),
+                    SymbolKind::Enum(enum_symbol_data) => todo!(),
+                }
+            }
+            MatchOn::Enum {
+                ident_id,
+                symbol_id,
+                variant_id,
+                params,
+            } => {
+                let enum_symbol = self
+                    .symbols
+                    .resolve(symbol_id.expect("enum symbol should have been resolved"));
+                match &enum_symbol.kind {
+                    SymbolKind::Struct(StructSymbolData {
+                        struct_id,
+                        full_def_span,
+                    }) => todo!(),
+                    SymbolKind::Fn(fn_symbol_data) => todo!(),
+                    SymbolKind::FnArg(fn_arg_symbol_data) => todo!(),
+                    SymbolKind::Var(var_symbol_data) => todo!(),
+                    SymbolKind::Enum(enum_symbol_data) => {
+                        todo!(
+                            "need to get the enum here, but I don't think enums have been processed yet"
+                        );
+                    }
+                }
+            }
+        };
     }
 
     fn check_atom(&mut self, atom: &Atom, span: &Span) -> Option<TypeId> {

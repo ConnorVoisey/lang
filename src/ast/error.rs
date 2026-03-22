@@ -360,6 +360,9 @@ impl ToDiagnostic for AstParseError {
                     "Only variables, array elements, and struct fields can be assigned to.",
                 )]),
             AstParseError::TypeParse(type_parse_error) => type_parse_error.to_diagnostic(file_id),
+            AstParseError::MatchParse(match_parse_error) => {
+                match_parse_error.to_diagnostic(file_id)
+            }
             AstParseError::LetExpectedIdent { token } => Diagnostic::error()
                 .with_message(self.to_string())
                 .with_labels(vec![

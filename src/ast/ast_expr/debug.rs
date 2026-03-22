@@ -2,7 +2,7 @@ use crate::{
     ast::{
         Ast,
         ast_block::{AstStatement, Lvalue, LvalueKind, StatementKind},
-        ast_expr::{AstExpr, Atom, ExprKind, Op},
+        ast_expr::{AstExpr, Atom, ExprKind, Op, match_expr::MatchOn},
     },
     interner::{Interner, SharedInterner},
     lexer::{Lexer, TokenKind},
@@ -149,10 +149,61 @@ impl Ast {
                         })
                         .collect(),
                 },
+                Op::Match { on, cases } => DebugOp::Match {
+                    on: self.expr_to_debug(on),
+                    cases: cases
+                        .iter()
+                        .map(|branch| DebugMatchBranch {
+                            on: self.match_on_to_debug(&branch.on),
+                            expr: self.expr_to_debug(&branch.expr),
+                        })
+                        .collect(),
+                },
             })),
         }
     }
 
+    fn match_on_to_debug(&self, match_on: &MatchOn) -> DebugMatchOn {
+        match match_on {
+            MatchOn::Int(v) => DebugMatchOn::Int(*v),
+            MatchOn::Bool(v) => DebugMatchOn::Bool(*v),
+            MatchOn::Str(v) => DebugMatchOn::Str(v.clone()),
+            MatchOn::Ident((ident, _)) => {
+                DebugMatchOn::Ident(self.interner.read().resolve(*ident).to_string())
+            }
+            MatchOn::Struct {
+                ident_id,
+                symbol_id: _,
+                args,
+                disgard_rest,
+            } => DebugMatchOn::Struct {
+                ident: self.interner.read().resolve(*ident_id).to_string(),
+                args: args
+                    .iter()
+                    .map(|(ident, match_on)| {
+                        (
+                            self.interner.read().resolve(*ident).to_string(),
+                            self.match_on_to_debug(match_on),
+                        )
+                    })
+                    .collect(),
+                disgard_rest: *disgard_rest,
+            },
+            MatchOn::Enum {
+                ident_id,
+                symbol_id: _,
+                variant_id,
+                params,
+            } => DebugMatchOn::Enum {
+                ident: self.interner.read().resolve(*ident_id).to_string(),
+                variant: self.interner.read().resolve(*variant_id).to_string(),
+                params: Box::new(match &**params {
+                    Some(match_on) => Some(self.match_on_to_debug(match_on)),
+                    None => None,
+                }),
+            },
+        }
+    }
     pub fn lvalue_to_debug_expr(&self, lvalue: &Lvalue) -> DebugExprKind {
         match &lvalue.kind {
             LvalueKind::Ident { ident_id, .. } => DebugExprKind::Atom(DebugAtom::Ident(
@@ -322,6 +373,34 @@ pub enum DebugOp {
         else_ifs: Vec<(DebugExprKind, Vec<DebugStatement>)>,
         unconditional_else: Option<Vec<DebugStatement>>,
     },
+    Match {
+        on: DebugExprKind,
+        cases: Vec<DebugMatchBranch>,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DebugMatchOn {
+    Int(i128),
+    Bool(bool),
+    Str(String),
+    Ident(String),
+    Struct {
+        ident: String,
+        args: Vec<(String, DebugMatchOn)>,
+        disgard_rest: bool,
+    },
+    Enum {
+        ident: String,
+        variant: String,
+        params: Box<Option<DebugMatchOn>>,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DebugMatchBranch {
+    pub on: DebugMatchOn,
+    pub expr: DebugExprKind,
 }
 
 pub fn parse_debug_setup(src: &str) -> (Ast, SymbolTable) {

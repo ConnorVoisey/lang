@@ -2,7 +2,7 @@ use crate::{
     ast::{
         Ast, VarType,
         ast_block::{AstBlock, AstStatement, Lvalue, LvalueKind, StatementKind},
-        ast_expr::{AstExpr, Atom, ExprKind, Op},
+        ast_expr::{AstExpr, Atom, ExprKind, Op, match_expr::MatchOn},
         ast_fn::AstFunc,
         ast_struct::{AstStruct, AstStructField},
     },
@@ -456,7 +456,33 @@ impl SymbolTable {
                         self.register_expr(expr);
                     }
                 }
+                Op::Match { on, cases } => {
+                    self.register_expr(on);
+                    for branch in cases {
+                        self.register_match(&mut branch.on);
+                        self.register_expr(&mut branch.expr);
+                    }
+                }
             },
+        }
+    }
+    pub fn register_match(&mut self, match_branch: &mut MatchOn) {
+        match match_branch {
+            MatchOn::Ident((ident_id, symbol_id))
+            | MatchOn::Struct {
+                ident_id,
+                symbol_id,
+                ..
+            }
+            | MatchOn::Enum {
+                ident_id,
+                symbol_id,
+                ..
+            } => {
+                *symbol_id = self.lookup(*ident_id);
+            }
+
+            MatchOn::Int(_) | MatchOn::Bool(_) | MatchOn::Str(_) => (),
         }
     }
 }

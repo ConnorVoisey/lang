@@ -1,10 +1,5 @@
 use crate::{
-    ast::{
-        Ast,
-        ast_block::AstBlock,
-        ast_expr::match_expr::{MatchBranch, MatchOn},
-        error::AstParseError,
-    },
+    ast::{Ast, ast_block::AstBlock, ast_expr::match_expr::MatchBranch, error::AstParseError},
     interner::IdentId,
     lexer::{Span, Token, TokenKind},
     symbols::{SymbolId, SymbolTable},
@@ -13,7 +8,6 @@ use crate::{
 
 pub mod array;
 pub mod debug;
-pub mod error;
 pub mod error;
 pub mod func;
 pub mod if_expr;

@@ -31,8 +31,9 @@ pub enum MatchOn {
 
 #[derive(Debug)]
 pub struct MatchBranch {
-    on: MatchOn,
-    expr: AstExpr,
+    pub on: MatchOn,
+    pub on_span: Span,
+    pub expr: AstExpr,
 }
 
 impl Ast {

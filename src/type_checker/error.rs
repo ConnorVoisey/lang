@@ -120,6 +120,18 @@ pub enum TypeCheckingError {
         lhs_span: Span,
     },
 
+    #[error("A match expression must have at least one branch")]
+    MatchMustHaveBranch { span: Span },
+
+    #[error("All branches of a match expression must return the same type")]
+    MatchOnIncompatable { lhs_span: Span, rhs_span: Span },
+
+    #[error("All branches of a match expression must return the same type")]
+    MatchBranchesHaveDifferentType { lhs_span: Span, rhs_span: Span },
+
+    #[error("The expression of this match doesn't have the type to match on")]
+    MatchOnIncompatible { expr_span: Span, on_span: Span },
+
     #[error("Array index must be an integer type, got {got_type_str}")]
     ArrayAccessIndexNotInteger {
         got_type_str: String,
